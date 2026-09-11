@@ -3,6 +3,21 @@
 All notable changes to Needs are documented here. Versions follow Semantic
 Versioning while the mod remains in active development.
 
+## [1.6.0] - 2026-09-11
+
+### Added
+
+- Optional hover-only HUD tooltips for each Needs meter. Hovering a meter shows
+  the need name, numeric value, current tier, any active recovery state, and the
+  active penalties for that need.
+- `hud.tooltips` configuration for enabling the tooltips, sizing, and tier
+  colors. Disabled tooltips leave the existing meters unchanged.
+
+### Changed
+
+- Hygiene recovery now records and reports its active source (clean liquid,
+  bath/tub, shower/bath, or rain) for the hover details.
+
 ## [1.5.0] - 2026-09-11
 
 ### Added

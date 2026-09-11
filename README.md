@@ -4,7 +4,7 @@ Needs is an xStarbound survival-simulation mod that adds Thirst, Fatigue,
 Bladder, and Hygiene to the player without replacing the vanilla or Frackin'
 Universe HUD.
 
-Current version: **1.5.0**
+Current version: **1.6.0**
 
 ## Requirements
 
@@ -21,6 +21,9 @@ supported.
 - Four thin, scale-aware meters anchored beneath the existing hunger bar.
 - Native Starbound-style icons and compatibility with FU/FrackinInterface HUD
   geometry.
+- Optional hover-only HUD details for each meter: name, value, tier, active
+  recovery state, and active penalties. Hidden until hovered, with no permanent
+  labels.
 - Configurable thresholds, warnings, and nonlethal gameplay consequences.
 - Automatic detection of vanilla, FU, and Workshop beverages after all assets
   load.
@@ -62,8 +65,17 @@ Important sections include:
 - `thresholds`, `consequences`, and `warnings`: severity and penalties.
 - `hygiene.environment` and `hygiene.combat`: environmental Dirtiness.
 - `sleep.fastForward`: sleep button, timescale, and multiplayer fallback.
-- `hud`: visibility, spacing, colors, and native icon paths.
+- `hud`: visibility, spacing, colors, native icon paths, and the optional
+  hover tooltips.
 - `debug`: local testing controls and logging.
+
+### HUD hover details
+
+Hovering any Needs meter displays a compact tooltip beside the meters with the
+need name, numeric value, current tier, any active recovery state, and the
+active penalties for that need. Tooltips are hover-only, reuse the existing HUD
+styling, and add no permanent labels or separate panel. Set
+`hud.tooltips.enabled` to `false` to disable them while keeping the meters.
 
 ## Testing commands
 

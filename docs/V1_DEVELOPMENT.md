@@ -1,4 +1,4 @@
-# Needs V1.5.0 development notes
+# Needs V1.6.0 development notes
 
 ## Architecture and persistence
 
@@ -229,6 +229,21 @@ Paths, scale, logical size, and spacing are configurable under `hud`; no vanilla
 or FU texture is replaced. Set hud.enabled to false to disable only the HUD. If another
 interface mod removes paneLayout.foodBar, visualization disables itself with a
 warning while simulation continues.
+
+Each draw pass records the four meter hit rectangles, expanding each by half the
+row gap so the thin bars are easy to hover without overlapping adjacent rows.
+When hud.tooltips.enabled is true and the cursor is inside one of those
+rectangles, a compact border-and-fill panel is drawn to the right of the meter
+icons. It lists the need name, the problem-aligned numeric value, the current
+tier, any active recovery state, and the active penalty dimensions for that
+need. The panel is clamped to the canvas, and if there is not enough room to the
+right it is placed to the left instead. It is anchored to the hovered row so it
+never crosses the status-effect row above or the sleep button below, and it is
+drawn only while hovered, so no permanent labels are added. Tooltip geometry,
+fonts, and tier colors live under hud.tooltips; disabling it leaves the meters
+and all other HUD behavior untouched. Hygiene recovery source selection is
+tracked while the environment is evaluated so the tooltip can report whether a
+clean liquid, bath/tub, shower/bath, or rain is actively cleaning the player.
 
 ## Debug commands
 

@@ -18,6 +18,7 @@ local pendingJumpingSeconds = 0
 local lastHygieneEnvironment = {}
 local beverageFeedbackCooldown = 0
 local fastForwardButtonRect
+local hudBarRects = {}
 local sleepFastForward = {
   mode = "idle",
   requested = false,
@@ -443,6 +444,35 @@ local function loadConfig()
   requireColor(config.hud.fatigueColor, "hud.fatigueColor")
   requireColor(config.hud.bladderColor, "hud.bladderColor")
   requireColor(config.hud.hygieneColor, "hud.hygieneColor")
+
+  -- hud.tooltips is optional so a config without it simply disables the
+  -- hover details instead of failing initialization.
+  local tooltips = config.hud.tooltips
+  if tooltips == nil then
+    tooltips = { enabled = false }
+    config.hud.tooltips = tooltips
+  end
+  if type(tooltips) ~= "table" or type(tooltips.enabled) ~= "boolean" then
+    error("[xneeds_v0] hud.tooltips.enabled must be a boolean")
+  end
+  if tooltips.enabled then
+    requireNonnegativeNumber(tooltips.gap, "hud.tooltips.gap")
+    requirePositiveNumber(tooltips.width, "hud.tooltips.width")
+    requireNonnegativeNumber(tooltips.padding, "hud.tooltips.padding")
+    requirePositiveNumber(tooltips.lineHeight, "hud.tooltips.lineHeight")
+    requirePositiveNumber(tooltips.fontSize, "hud.tooltips.fontSize")
+    requireColor(tooltips.textColor, "hud.tooltips.textColor")
+    if type(tooltips.tierColors) ~= "table" then
+      error("[xneeds_v0] hud.tooltips.tierColors must be an object")
+    end
+    requireColor(tooltips.tierColors.normal, "hud.tooltips.tierColors.normal")
+    for _, threshold in ipairs(config.thresholds) do
+      requireColor(
+        tooltips.tierColors[threshold.key],
+        "hud.tooltips.tierColors." .. threshold.key
+      )
+    end
+  end
 
   if type(config.debug.commandsEnabled) ~= "boolean" then
     error("[xneeds_v0] debug.commandsEnabled must be a boolean")
@@ -952,23 +982,31 @@ local function hygieneEnvironment(elapsed)
   end
 
   local rate = loungeHygieneRecoveryRate()
+  local recoverySource = rate > 0 and "bath/tub" or nil
   if liquidClass == "clean"
       and liquidPercentage >= needsConfig.hygiene.minimumLiquidPercentage then
-    rate = math.max(
-      rate,
-      needsConfig.hygiene.cleanLiquidRecoveryRates[liquidName]
-        or needsConfig.hygiene.waterRecoveryPerSecond
-    )
+    local liquidRate = needsConfig.hygiene.cleanLiquidRecoveryRates[liquidName]
+      or needsConfig.hygiene.waterRecoveryPerSecond
+    if liquidRate > rate then
+      rate = liquidRate
+      recoverySource = "clean " .. liquidName
+    end
   end
-  rate = math.max(rate, nearbyActiveFixtureRecoveryRate())
+
+  local fixtureRate = nearbyActiveFixtureRecoveryRate()
+  if fixtureRate > rate then
+    rate = fixtureRate
+    recoverySource = "shower/bath"
+  end
 
   local rainEffect
   if liquidPercentage < environment.minimumLiquidPercentage then
     local undergroundOk, underground = pcall(world.underground, mcontroller.position())
     if not undergroundOk or not underground then
       rainEffect = activeConfiguredStatusEffect(environment.rainStatusEffects)
-      if rainEffect then
-        rate = math.max(rate, environment.rainRecoveryPerSecond)
+      if rainEffect and environment.rainRecoveryPerSecond > rate then
+        rate = environment.rainRecoveryPerSecond
+        recoverySource = "rain"
       end
     end
   end
@@ -999,6 +1037,7 @@ local function hygieneEnvironment(elapsed)
     liquidPercentage = liquidPercentage,
     rainEffect = rainEffect,
     recoveryRate = rate,
+    recoverySource = recoverySource,
     passiveLoss = passiveLoss,
     activityLoss = activityLoss,
     contaminationLoss = contaminationLoss,
@@ -1570,7 +1609,7 @@ local function commandStatus()
   local consequences = currentConsequences()
   local hygieneState = hygieneEnvironment(needsConfig.updateInterval)
   return string.format(
-    "^#f3d36a;<Needs V1.5>^reset;\n"
+    "^#f3d36a;<Needs V1.6>^reset;\n"
       .. "Thirst: ^cyan;%.1f^reset; [%s]\n"
       .. "Fatigue: ^cyan;%.1f^reset; [%s]\n"
       .. "Bladder: ^cyan;%.1f^reset; [%s]\n"
@@ -1760,6 +1799,198 @@ local function needsCommand(rawArguments)
   return commandHelp("Unknown operation.")
 end
 
+local tooltipNeedOrder = { "thirst", "fatigue", "bladder", "hygiene" }
+
+local needDisplayNames = {
+  thirst = "Thirst",
+  fatigue = "Fatigue",
+  bladder = "Bladder",
+  hygiene = "Hygiene"
+}
+
+local consequenceLabels = {
+  speed = "Speed",
+  jump = "Jump",
+  power = "Power",
+  energyRegen = "Energy",
+  protection = "Protection"
+}
+
+local function needDisplayName(needName)
+  return needDisplayNames[needName] or needName
+end
+
+local function needHudColor(needName)
+  return needsConfig.hud[needName .. "Color"]
+end
+
+local function tierDisplayName(level)
+  if level <= 0 then
+    return "Normal"
+  end
+  local key = needsConfig.thresholds[level].key
+  return string.upper(string.sub(key, 1, 1)) .. string.sub(key, 2)
+end
+
+local function tierHudColor(level)
+  local key = level <= 0 and "normal" or needsConfig.thresholds[level].key
+  return needsConfig.hud.tooltips.tierColors[key]
+    or needsConfig.hud.tooltips.textColor
+end
+
+local function needRecoveryState(needName, sleeping)
+  if needName == "fatigue" then
+    if sleeping then
+      return "Recovery: sleeping"
+    end
+    if caffeineActive() then
+      if needsConfig.beverages.caffeineAwakeGainMultiplier <= 0 then
+        return "Caffeine: awake fatigue paused"
+      end
+      return "Caffeine active"
+    end
+  elseif needName == "bladder" then
+    if bladderReliefRate() > 0 then
+      return "Relief: toilet"
+    end
+  elseif needName == "hygiene" then
+    local state = lastHygieneEnvironment
+    if isFiniteNumber(state.recoveryRate) and state.recoveryRate > 0 then
+      if type(state.recoverySource) == "string" and state.recoverySource ~= "" then
+        return "Recovery: " .. state.recoverySource
+      end
+      return "Recovery: cleaning"
+    end
+  end
+end
+
+local function appendNeedConsequenceLines(lines, needName, textColor)
+  if not needsConfig.consequences.enabled then
+    table.insert(lines, { text = "Penalties disabled", color = textColor })
+    return
+  end
+
+  local level = needLevel(problemValue(needName))
+  if level <= 0 then
+    table.insert(lines, { text = "No active penalty", color = textColor })
+    return
+  end
+
+  local tierKey = needsConfig.thresholds[level].key
+  local profile = needsConfig.consequences.profiles[needName][tierKey]
+  local count = 0
+  for _, dimension in ipairs(consequenceDimensions) do
+    local multiplier = profile[dimension]
+    if isFiniteNumber(multiplier) and multiplier < 1 then
+      table.insert(lines, {
+        text = string.format(
+          "%s %+d%%",
+          consequenceLabels[dimension],
+          math.floor((multiplier - 1) * 100 + 0.5)
+        ),
+        color = textColor
+      })
+      count = count + 1
+    end
+  end
+  if count == 0 then
+    table.insert(lines, { text = "No active penalty", color = textColor })
+  end
+end
+
+local function needTooltipLines(needName, sleeping)
+  local problem = problemValue(needName)
+  local level = needLevel(problem)
+  local textColor = needsConfig.hud.tooltips.textColor
+  local lines = {
+    {
+      text = needDisplayName(needName),
+      color = needHudColor(needName)
+    },
+    {
+      text = needName == "hygiene"
+        and string.format("Dirtiness %d / 100", math.floor(problem + 0.5))
+        or string.format("Value %d / 100", math.floor(problem + 0.5)),
+      color = textColor
+    },
+    {
+      text = "Tier: " .. tierDisplayName(level),
+      color = tierHudColor(level)
+    }
+  }
+
+  local recovery = needRecoveryState(needName, sleeping)
+  if recovery then
+    table.insert(lines, { text = recovery, color = textColor })
+  end
+  appendNeedConsequenceLines(lines, needName, textColor)
+  return lines
+end
+
+local function hoveredNeedName()
+  if not hudCanvas then
+    return nil
+  end
+  local mousePosition = hudCanvas:mousePosition()
+  for _, needName in ipairs(tooltipNeedOrder) do
+    if pointInsideRect(mousePosition, hudBarRects[needName]) then
+      return needName
+    end
+  end
+end
+
+local function drawNeedTooltip(needName, sleeping, topY)
+  local tooltips = needsConfig.hud.tooltips
+  local lines = needTooltipLines(needName, sleeping)
+  local width = tooltips.width
+  local height = tooltips.padding * 2 + #lines * tooltips.lineHeight
+
+  local canvasSize = hudCanvas:size()
+  local anchorX = hudLayout.x
+    + hudLayout.width
+    + needsConfig.hud.iconGap
+    + needsConfig.hud.iconSize
+    + tooltips.gap
+  if anchorX + width > canvasSize[1] - 2 then
+    anchorX = math.max(2, hudLayout.x - tooltips.gap - width)
+  end
+
+  local anchorY = topY
+  local maximumY = canvasSize[2] - height - 2
+  if anchorY > maximumY then
+    anchorY = maximumY
+  end
+  if anchorY < 2 then
+    anchorY = 2
+  end
+
+  hudCanvas:drawRect(
+    {anchorX, anchorY, anchorX + width, anchorY + height},
+    needsConfig.hud.borderColor
+  )
+  hudCanvas:drawRect(
+    {anchorX + 1, anchorY + 1, anchorX + width - 1, anchorY + height - 1},
+    needsConfig.hud.backgroundColor
+  )
+
+  local textX = anchorX + tooltips.padding
+  local textY = anchorY + height - tooltips.padding
+  for _, line in ipairs(lines) do
+    hudCanvas:drawText(
+      line.text,
+      {
+        position = {textX, textY},
+        horizontalAnchor = "left",
+        verticalAnchor = "top",
+        wrapWidth = width - tooltips.padding * 2
+      },
+      tooltips.fontSize,
+      line.color
+    )
+    textY = textY - tooltips.lineHeight
+  end
+end
+
 local function loadHudLayout()
   local teamBar = root.assetJson("/interface/windowconfig/teambar.config")
   local foodBar = teamBar
@@ -1788,7 +2019,7 @@ local function loadHudLayout()
   }
 end
 
-local function drawNeedBar(y, ratio, color, iconPath)
+local function drawNeedBar(needName, y, ratio, color, iconPath)
   local x = hudLayout.x
   local width = hudLayout.width
   local height = needsConfig.hud.barHeight
@@ -1830,6 +2061,15 @@ local function drawNeedBar(y, ratio, color, iconPath)
     {255, 255, 255, 255},
     true
   )
+
+  local step = height + needsConfig.hud.barGap
+  local hoverPad = math.max(0, (step - height) / 2)
+  hudBarRects[needName] = {
+    x,
+    y - hoverPad,
+    x + width + needsConfig.hud.iconGap + iconSize,
+    y + height + hoverPad
+  }
 end
 
 local function drawFastForwardButton(y)
@@ -1884,6 +2124,7 @@ local function drawHud(sleeping)
 
   hudCanvas:clear()
   fastForwardButtonRect = nil
+  hudBarRects = {}
 
   local canvasSize = hudCanvas:size()
   local height = needsConfig.hud.barHeight
@@ -1892,24 +2133,28 @@ local function drawHud(sleeping)
 
   if needsConfig.hud.enabled then
     drawNeedBar(
+      "thirst",
       firstY,
       storage.needs.thirst,
       needsConfig.hud.thirstColor,
       needsConfig.hud.icons.thirst
     )
     drawNeedBar(
+      "fatigue",
       firstY - step,
       storage.needs.fatigue,
       needsConfig.hud.fatigueColor,
       needsConfig.hud.icons.fatigue
     )
     drawNeedBar(
+      "bladder",
       firstY - step * 2,
       storage.needs.bladder,
       needsConfig.hud.bladderColor,
       needsConfig.hud.icons.bladder
     )
     drawNeedBar(
+      "hygiene",
       firstY - step * 3,
       100 - storage.needs.hygiene,
       needsConfig.hud.hygieneColor,
@@ -1926,6 +2171,14 @@ local function drawHud(sleeping)
       - needsConfig.sleep.fastForward.buttonGap
       - needsConfig.sleep.fastForward.buttonHeight
     drawFastForwardButton(buttonY)
+  end
+
+  if needsConfig.hud.enabled and needsConfig.hud.tooltips.enabled then
+    local hovered = hoveredNeedName()
+    if hovered then
+      local hoverRect = hudBarRects[hovered]
+      drawNeedTooltip(hovered, sleeping, hoverRect[4])
+    end
   end
 end
 
