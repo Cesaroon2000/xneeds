@@ -1,2 +1,12 @@
-# Auto detect text files and perform LF normalization
-* text=auto
+* text=auto eol=lf
+
+*.lua text eol=lf
+*.config text eol=lf
+*.patch text eol=lf
+*.md text eol=lf
+_metadata text eol=lf
+
+*.png binary
+*.ogg binary
+*.wav binary
+*.pak binary

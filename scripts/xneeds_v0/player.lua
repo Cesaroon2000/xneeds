@@ -1,0 +1,2004 @@
+local storageVersion = 2
+local consequenceCategory = "xneeds_v1_penalties"
+
+local needsConfig
+local updateAccumulator = 0
+local hudCanvas
+local hudLayout
+local cleanLiquidIds = {}
+local dirtyLiquidIds = {}
+local liquidClassifications = {}
+local warningLevels = {}
+local appliedConsequenceSignature
+local damageTakenHeartbeat
+local damageInflictedHeartbeat
+local pendingCombatDirtiness = 0
+local pendingRunningSeconds = 0
+local pendingJumpingSeconds = 0
+local lastHygieneEnvironment = {}
+local beverageFeedbackCooldown = 0
+local fastForwardButtonRect
+local sleepFastForward = {
+  mode = "idle",
+  requested = false,
+  token = nil,
+  confirmedToken = nil,
+  sequence = 0,
+  probeElapsed = 0,
+  recheckRemaining = 0,
+  timeScaled = false,
+  sleepWasActive = false,
+  activationNotified = false,
+  fallbackNotified = false
+}
+
+local needNames = {
+  thirst = true,
+  fatigue = true,
+  bladder = true,
+  hygiene = true
+}
+
+local consequenceDimensions = {
+  "speed",
+  "jump",
+  "power",
+  "energyRegen",
+  "protection"
+}
+
+local function isFiniteNumber(value)
+  return type(value) == "number"
+    and value == value
+    and value ~= math.huge
+    and value ~= -math.huge
+end
+
+local function clampNeed(value)
+  return math.max(0, math.min(100, value))
+end
+
+local function requireNumber(value, path)
+  if not isFiniteNumber(value) then
+    error(string.format("[xneeds_v0] %s must be a finite number", path))
+  end
+  return value
+end
+
+local function requirePositiveNumber(value, path)
+  value = requireNumber(value, path)
+  if value <= 0 then
+    error(string.format("[xneeds_v0] %s must be greater than zero", path))
+  end
+  return value
+end
+
+local function requireNonnegativeNumber(value, path)
+  value = requireNumber(value, path)
+  if value < 0 then
+    error(string.format("[xneeds_v0] %s must not be negative", path))
+  end
+  return value
+end
+
+local function requireMultiplier(value, path)
+  value = requirePositiveNumber(value, path)
+  if value > 1 then
+    error(string.format("[xneeds_v0] %s must not exceed 1", path))
+  end
+  return value
+end
+
+local function requireStringList(value, path)
+  if type(value) ~= "table" then
+    error(string.format("[xneeds_v0] %s must be a list", path))
+  end
+  for index, entry in ipairs(value) do
+    if type(entry) ~= "string" or entry == "" then
+      error(string.format("[xneeds_v0] %s[%s] must be a non-empty string", path, index))
+    end
+  end
+end
+
+local function requirePositiveNumberMap(value, path)
+  if type(value) ~= "table" then
+    error(string.format("[xneeds_v0] %s must be an object", path))
+  end
+  for key, entry in pairs(value) do
+    if type(key) ~= "string" or key == "" then
+      error(string.format("[xneeds_v0] %s keys must be non-empty strings", path))
+    end
+    requirePositiveNumber(entry, path .. "." .. key)
+  end
+end
+
+local function requireColor(value, path)
+  if type(value) ~= "table" or #value ~= 4 then
+    error(string.format("[xneeds_v0] %s must be an RGBA color", path))
+  end
+  for index, channel in ipairs(value) do
+    requireNumber(channel, string.format("%s[%s]", path, index))
+    if channel < 0 or channel > 255 then
+      error(string.format("[xneeds_v0] %s channels must be between 0 and 255", path))
+    end
+  end
+end
+
+local function loadConfig()
+  local config = root.assetJson("/xneeds_v0.config")
+  local requiredSections = {
+    "defaults",
+    "thirst",
+    "fatigue",
+    "bladder",
+    "beverages",
+    "hygiene",
+    "sleep",
+    "thresholds",
+    "consequences",
+    "warnings",
+    "hud",
+    "debug"
+  }
+
+  if type(config) ~= "table" then
+    error("[xneeds_v0] xneeds_v0.config is invalid")
+  end
+  for _, section in ipairs(requiredSections) do
+    if type(config[section]) ~= "table" then
+      error(string.format("[xneeds_v0] xneeds_v0.config is missing %s", section))
+    end
+  end
+
+  requireNumber(config.schemaVersion, "schemaVersion")
+  if config.schemaVersion ~= storageVersion then
+    error(string.format(
+      "[xneeds_v0] config schema %s does not match storage schema %s",
+      config.schemaVersion,
+      storageVersion
+    ))
+  end
+
+  requirePositiveNumber(config.updateInterval, "updateInterval")
+  requirePositiveNumber(config.maxCatchupSeconds, "maxCatchupSeconds")
+  if config.maxCatchupSeconds < config.updateInterval then
+    error("[xneeds_v0] maxCatchupSeconds must be at least updateInterval")
+  end
+
+  for needName in pairs(needNames) do
+    requireNumber(config.defaults[needName], "defaults." .. needName)
+    config.defaults[needName] = clampNeed(config.defaults[needName])
+  end
+
+  requireNonnegativeNumber(config.thirst.passiveGainPerSecond, "thirst.passiveGainPerSecond")
+  requireNonnegativeNumber(config.fatigue.awakeGainPerSecond, "fatigue.awakeGainPerSecond")
+  requireNonnegativeNumber(config.fatigue.sleepRecoveryPerSecond, "fatigue.sleepRecoveryPerSecond")
+  requireNonnegativeNumber(config.bladder.passiveGainPerSecond, "bladder.passiveGainPerSecond")
+  requireNonnegativeNumber(config.bladder.reliefRatePerSecond, "bladder.reliefRatePerSecond")
+  requireNonnegativeNumber(config.hygiene.decayPerSecond, "hygiene.decayPerSecond")
+  requireNonnegativeNumber(config.hygiene.waterRecoveryPerSecond, "hygiene.waterRecoveryPerSecond")
+  requireNonnegativeNumber(config.hygiene.fixtureRecoveryPerSecond, "hygiene.fixtureRecoveryPerSecond")
+  requireNumber(config.hygiene.minimumLiquidPercentage, "hygiene.minimumLiquidPercentage")
+  if config.hygiene.minimumLiquidPercentage < 0
+      or config.hygiene.minimumLiquidPercentage > 1 then
+    error("[xneeds_v0] hygiene.minimumLiquidPercentage must be between 0 and 1")
+  end
+  requireNonnegativeNumber(config.hygiene.fixtureSearchRadius, "hygiene.fixtureSearchRadius")
+  if type(config.hygiene.environment) ~= "table"
+      or type(config.hygiene.combat) ~= "table" then
+    error("[xneeds_v0] hygiene environment or combat configuration is missing")
+  end
+  requirePositiveNumberMap(
+    config.hygiene.cleanLiquidRecoveryRates,
+    "hygiene.cleanLiquidRecoveryRates"
+  )
+
+  local environment = config.hygiene.environment
+  requireNumber(environment.minimumLiquidPercentage, "hygiene.environment.minimumLiquidPercentage")
+  if environment.minimumLiquidPercentage < 0
+      or environment.minimumLiquidPercentage > 1 then
+    error("[xneeds_v0] hygiene.environment.minimumLiquidPercentage must be between 0 and 1")
+  end
+  requireNonnegativeNumber(environment.dirtyLiquidRatePerSecond, "hygiene.environment.dirtyLiquidRatePerSecond")
+  requireNonnegativeNumber(environment.rainRecoveryPerSecond, "hygiene.environment.rainRecoveryPerSecond")
+  requireNonnegativeNumber(environment.runningExtraDecayPerSecond, "hygiene.environment.runningExtraDecayPerSecond")
+  requireNonnegativeNumber(environment.jumpingExtraDecayPerSecond, "hygiene.environment.jumpingExtraDecayPerSecond")
+  requireStringList(environment.dirtyLiquidNames, "hygiene.environment.dirtyLiquidNames")
+  requireStringList(environment.dirtyLiquidNamePatterns, "hygiene.environment.dirtyLiquidNamePatterns")
+  requireStringList(environment.dirtyLiquidStatusEffects, "hygiene.environment.dirtyLiquidStatusEffects")
+  requireStringList(environment.rainStatusEffects, "hygiene.environment.rainStatusEffects")
+  requirePositiveNumberMap(environment.biomeDecayMultipliers, "hygiene.environment.biomeDecayMultipliers")
+  requirePositiveNumberMap(
+    environment.environmentEffectDecayMultipliers,
+    "hygiene.environment.environmentEffectDecayMultipliers"
+  )
+
+  local combat = config.hygiene.combat
+  requireNonnegativeNumber(combat.damageTakenBaseLoss, "hygiene.combat.damageTakenBaseLoss")
+  requireNonnegativeNumber(combat.damageTakenPerHealth, "hygiene.combat.damageTakenPerHealth")
+  requireNonnegativeNumber(combat.damageInflictedBaseLoss, "hygiene.combat.damageInflictedBaseLoss")
+  requireNonnegativeNumber(combat.damageInflictedPerDamage, "hygiene.combat.damageInflictedPerDamage")
+  requireNonnegativeNumber(combat.maximumLossPerUpdate, "hygiene.combat.maximumLossPerUpdate")
+
+  local stringSettings = {
+    {config.thirst.overrideParameter, "thirst.overrideParameter"},
+    {config.bladder.drinkCategory, "bladder.drinkCategory"},
+    {config.bladder.overrideParameter, "bladder.overrideParameter"},
+    {config.bladder.reliefOverrideParameter, "bladder.reliefOverrideParameter"},
+    {config.beverages.profileParameter, "beverages.profileParameter"},
+    {config.beverages.fatigueChangeParameter, "beverages.fatigueChangeParameter"},
+    {config.beverages.caffeineDurationParameter, "beverages.caffeineDurationParameter"},
+    {config.beverages.caffeineEffect, "beverages.caffeineEffect"},
+    {config.hygiene.fixtureOverrideParameter, "hygiene.fixtureOverrideParameter"}
+  }
+  for _, setting in ipairs(stringSettings) do
+    if type(setting[1]) ~= "string" or setting[1] == "" then
+      error(string.format("[xneeds_v0] %s must be a non-empty string", setting[2]))
+    end
+  end
+
+  if type(config.thirst.itemOverrides) ~= "table"
+      or type(config.bladder.itemOverrides) ~= "table" then
+    error("[xneeds_v0] itemOverrides settings must be objects")
+  end
+
+  local beverages = config.beverages
+  if type(beverages.defaultProfile) ~= "string"
+      or beverages.defaultProfile == ""
+      or type(beverages.profiles) ~= "table"
+      or type(beverages.itemProfiles) ~= "table"
+      or type(beverages.classificationRules) ~= "table" then
+    error("[xneeds_v0] beverages configuration is invalid")
+  end
+  requireNumber(
+    beverages.caffeineAwakeGainMultiplier,
+    "beverages.caffeineAwakeGainMultiplier"
+  )
+  if beverages.caffeineAwakeGainMultiplier < 0
+      or beverages.caffeineAwakeGainMultiplier > 1 then
+    error("[xneeds_v0] beverages.caffeineAwakeGainMultiplier must be between 0 and 1")
+  end
+
+  for profileName, profile in pairs(beverages.profiles) do
+    local path = "beverages.profiles." .. tostring(profileName)
+    if type(profileName) ~= "string" or profileName == ""
+        or type(profile) ~= "table" then
+      error("[xneeds_v0] beverage profile names and values must be valid")
+    end
+    requireNumber(profile.thirstRecovery, path .. ".thirstRecovery")
+    requireNumber(profile.bladderGain, path .. ".bladderGain")
+    requireNumber(profile.fatigueChange, path .. ".fatigueChange")
+    requireNonnegativeNumber(profile.caffeineDuration, path .. ".caffeineDuration")
+  end
+  if type(beverages.profiles[beverages.defaultProfile]) ~= "table" then
+    error("[xneeds_v0] beverages.defaultProfile does not name a profile")
+  end
+
+  for itemName, profileName in pairs(beverages.itemProfiles) do
+    if type(itemName) ~= "string" or itemName == ""
+        or type(profileName) ~= "string"
+        or type(beverages.profiles[profileName]) ~= "table" then
+      error("[xneeds_v0] beverages.itemProfiles contains an invalid mapping")
+    end
+  end
+  for index, rule in ipairs(beverages.classificationRules) do
+    local path = string.format("beverages.classificationRules[%s]", index)
+    if type(rule) ~= "table"
+        or type(rule.profile) ~= "string"
+        or type(beverages.profiles[rule.profile]) ~= "table" then
+      error("[xneeds_v0] " .. path .. " has an invalid profile")
+    end
+    requireStringList(rule.patterns, path .. ".patterns")
+  end
+  local feedback = beverages.feedback
+  if type(feedback) ~= "table"
+      or type(feedback.enabled) ~= "boolean"
+      or type(feedback.profileMessages) ~= "table"
+      or type(feedback.dehydratingMessage) ~= "string"
+      or feedback.dehydratingMessage == "" then
+    error("[xneeds_v0] beverages.feedback configuration is invalid")
+  end
+  requireNonnegativeNumber(
+    feedback.cooldownSeconds,
+    "beverages.feedback.cooldownSeconds"
+  )
+  for profileName, messageText in pairs(feedback.profileMessages) do
+    if type(beverages.profiles[profileName]) ~= "table"
+        or type(messageText) ~= "string"
+        or messageText == "" then
+      error("[xneeds_v0] beverages.feedback.profileMessages contains an invalid entry")
+    end
+  end
+
+  requireStringList(config.bladder.reliefObjectNamePatterns, "bladder.reliefObjectNamePatterns")
+  requireStringList(config.hygiene.cleanLiquidNames, "hygiene.cleanLiquidNames")
+  requireStringList(config.hygiene.activeFixtureObjectNames, "hygiene.activeFixtureObjectNames")
+  requireStringList(config.hygiene.loungeObjectNamePatterns, "hygiene.loungeObjectNamePatterns")
+  requireStringList(config.sleep.bedEffects, "sleep.bedEffects")
+
+  local fastForward = config.sleep.fastForward
+  if type(fastForward) ~= "table"
+      or type(fastForward.enabled) ~= "boolean"
+      or type(fastForward.multiplayerFallbackEnabled) ~= "boolean"
+      or type(fastForward.showMessages) ~= "boolean" then
+    error("[xneeds_v0] sleep.fastForward configuration is invalid")
+  end
+  requirePositiveNumber(fastForward.timeScale, "sleep.fastForward.timeScale")
+  requirePositiveNumber(fastForward.restoreTimeScale, "sleep.fastForward.restoreTimeScale")
+  requirePositiveNumber(
+    fastForward.probeTimeoutSeconds,
+    "sleep.fastForward.probeTimeoutSeconds"
+  )
+  requirePositiveNumber(fastForward.recheckSeconds, "sleep.fastForward.recheckSeconds")
+  requirePositiveNumber(
+    fastForward.multiplayerNeedsScale,
+    "sleep.fastForward.multiplayerNeedsScale"
+  )
+  requirePositiveNumber(fastForward.buttonWidth, "sleep.fastForward.buttonWidth")
+  requirePositiveNumber(fastForward.buttonHeight, "sleep.fastForward.buttonHeight")
+  requireNonnegativeNumber(fastForward.buttonGap, "sleep.fastForward.buttonGap")
+  requireColor(fastForward.buttonColor, "sleep.fastForward.buttonColor")
+  requireColor(fastForward.buttonHoverColor, "sleep.fastForward.buttonHoverColor")
+  requireColor(fastForward.buttonActiveColor, "sleep.fastForward.buttonActiveColor")
+  requireColor(fastForward.buttonTextColor, "sleep.fastForward.buttonTextColor")
+
+  if type(config.warnings.enabled) ~= "boolean"
+      or type(config.warnings.messages) ~= "table" then
+    error("[xneeds_v0] warnings configuration is invalid")
+  end
+
+  if #config.thresholds == 0 then
+    error("[xneeds_v0] thresholds must contain at least one tier")
+  end
+
+  local previousThreshold = 0
+  local thresholdKeys = {}
+  for index, threshold in ipairs(config.thresholds) do
+    local path = string.format("thresholds[%s]", index)
+    if type(threshold) ~= "table"
+        or type(threshold.key) ~= "string"
+        or threshold.key == "" then
+      error(string.format("[xneeds_v0] %s must have a non-empty key", path))
+    end
+    if thresholdKeys[threshold.key] then
+      error(string.format("[xneeds_v0] duplicate threshold key: %s", threshold.key))
+    end
+    thresholdKeys[threshold.key] = true
+
+    requireNumber(threshold.value, path .. ".value")
+    if threshold.value <= previousThreshold or threshold.value > 100 then
+      error("[xneeds_v0] thresholds must be strictly increasing within 0 through 100")
+    end
+    previousThreshold = threshold.value
+  end
+
+  if type(config.consequences.enabled) ~= "boolean"
+      or type(config.consequences.minimumMultipliers) ~= "table"
+      or type(config.consequences.profiles) ~= "table" then
+    error("[xneeds_v0] consequences configuration is invalid")
+  end
+
+  for _, dimension in ipairs(consequenceDimensions) do
+    requireMultiplier(
+      config.consequences.minimumMultipliers[dimension],
+      "consequences.minimumMultipliers." .. dimension
+    )
+  end
+
+  for needName in pairs(needNames) do
+    local profiles = config.consequences.profiles[needName]
+    local messages = config.warnings.messages[needName]
+    if type(profiles) ~= "table" or type(messages) ~= "table" then
+      error(string.format("[xneeds_v0] consequence or warning profile missing for %s", needName))
+    end
+
+    for _, threshold in ipairs(config.thresholds) do
+      local profile = profiles[threshold.key]
+      if type(profile) ~= "table" then
+        error(string.format(
+          "[xneeds_v0] consequences.profiles.%s.%s must be an object",
+          needName,
+          threshold.key
+        ))
+      end
+      for _, dimension in ipairs(consequenceDimensions) do
+        if profile[dimension] ~= nil then
+          requireMultiplier(
+            profile[dimension],
+            string.format("consequences.profiles.%s.%s.%s", needName, threshold.key, dimension)
+          )
+        end
+      end
+
+      if type(messages[threshold.key]) ~= "string" or messages[threshold.key] == "" then
+        error(string.format("[xneeds_v0] warning message missing for %s.%s", needName, threshold.key))
+      end
+    end
+  end
+
+  if type(config.hud.enabled) ~= "boolean"
+      or type(config.hud.canvasName) ~= "string"
+      or config.hud.canvasName == "" then
+    error("[xneeds_v0] hud.enabled or hud.canvasName is invalid")
+  end
+  requirePositiveNumber(config.hud.barHeight, "hud.barHeight")
+  requireNonnegativeNumber(config.hud.barGap, "hud.barGap")
+  requireNonnegativeNumber(config.hud.topGap, "hud.topGap")
+  requireNonnegativeNumber(config.hud.leftInset, "hud.leftInset")
+  requireNonnegativeNumber(config.hud.iconGap, "hud.iconGap")
+  requirePositiveNumber(config.hud.iconScale, "hud.iconScale")
+  requirePositiveNumber(config.hud.iconSize, "hud.iconSize")
+  if type(config.hud.icons) ~= "table" then
+    error("[xneeds_v0] hud.icons must be an object")
+  end
+  for needName in pairs(needNames) do
+    if type(config.hud.icons[needName]) ~= "string"
+        or config.hud.icons[needName] == "" then
+      error("[xneeds_v0] hud.icons." .. needName .. " must be an image path")
+    end
+  end
+  requireColor(config.hud.backgroundColor, "hud.backgroundColor")
+  requireColor(config.hud.borderColor, "hud.borderColor")
+  requireColor(config.hud.thirstColor, "hud.thirstColor")
+  requireColor(config.hud.fatigueColor, "hud.fatigueColor")
+  requireColor(config.hud.bladderColor, "hud.bladderColor")
+  requireColor(config.hud.hygieneColor, "hud.hygieneColor")
+
+  if type(config.debug.commandsEnabled) ~= "boolean" then
+    error("[xneeds_v0] debug.commandsEnabled must be a boolean")
+  end
+
+  config.bladder.drinkCategory = string.lower(config.bladder.drinkCategory)
+  return config
+end
+
+local function normalizedStoredValue(value, defaultValue)
+  if not isFiniteNumber(value) then
+    return defaultValue
+  end
+  return clampNeed(value)
+end
+
+local function migrateNeeds(rawNeeds)
+  if type(rawNeeds) ~= "table" then
+    rawNeeds = {}
+  end
+
+  -- Schema 1 had fatigue, bladder, and hygiene. Schema 2 preserves those
+  -- values and initializes the newly introduced thirst field.
+  return {
+    version = storageVersion,
+    thirst = normalizedStoredValue(rawNeeds.thirst, needsConfig.defaults.thirst),
+    fatigue = normalizedStoredValue(rawNeeds.fatigue, needsConfig.defaults.fatigue),
+    bladder = normalizedStoredValue(rawNeeds.bladder, needsConfig.defaults.bladder),
+    hygiene = normalizedStoredValue(rawNeeds.hygiene, needsConfig.defaults.hygiene)
+  }
+end
+
+local function normalizeStorage()
+  storage.needs = migrateNeeds(storage.needs)
+end
+
+local function needSnapshot()
+  normalizeStorage()
+  return {
+    version = storage.needs.version,
+    thirst = storage.needs.thirst,
+    fatigue = storage.needs.fatigue,
+    bladder = storage.needs.bladder,
+    hygiene = storage.needs.hygiene
+  }
+end
+
+local function safeCurrentEmoteIsSleep()
+  if type(player.currentEmote) ~= "function" then
+    return false
+  end
+  local ok, emote = pcall(player.currentEmote)
+  return ok and type(emote) == "string" and string.lower(emote) == "sleep"
+end
+
+local function hasBedEffect()
+  for _, effectName in ipairs(needsConfig.sleep.bedEffects) do
+    if status.uniqueStatusEffectActive(effectName) then
+      return true
+    end
+  end
+  return false
+end
+
+local function objectParameter(objectId, parameterName)
+  if not objectId then
+    return nil
+  end
+  local ok, value = pcall(world.getObjectParameter, objectId, parameterName)
+  if ok then
+    return value
+  end
+end
+
+local function objectName(objectId)
+  if not objectId then
+    return nil
+  end
+  local ok, value = pcall(world.entityName, objectId)
+  if ok and type(value) == "string" then
+    return string.lower(value)
+  end
+end
+
+local function nameMatchesPatterns(name, patterns)
+  if type(name) ~= "string" then
+    return false
+  end
+  for _, pattern in ipairs(patterns) do
+    if string.find(name, string.lower(pattern), 1, true) then
+      return true
+    end
+  end
+  return false
+end
+
+local function nameMatchesList(name, names)
+  if type(name) ~= "string" then
+    return false
+  end
+  for _, candidate in ipairs(names) do
+    if name == string.lower(candidate) then
+      return true
+    end
+  end
+  return false
+end
+
+local function loungingObjectUsesSleepEmote()
+  local loungeId = player.loungingIn()
+  local sitEmote = objectParameter(loungeId, "sitEmote")
+  return type(sitEmote) == "string" and string.lower(sitEmote) == "sleep"
+end
+
+local function isSleeping()
+  if not player.isLounging() then
+    return false
+  end
+  return safeCurrentEmoteIsSleep()
+    or hasBedEffect()
+    or loungingObjectUsesSleepEmote()
+end
+
+local function isPrimaryPlayer()
+  if type(world.primaryPlayer) ~= "function" then
+    return true
+  end
+  local ok, primaryPlayerId = pcall(world.primaryPlayer)
+  return not ok or primaryPlayerId == entity.id()
+end
+
+local function setApplicationTimeScale(scale)
+  if type(chat) ~= "table" or type(chat.command) ~= "function" then
+    return false
+  end
+  local ok = pcall(
+    chat.command,
+    string.format("/timescale %.6f", scale),
+    false
+  )
+  return ok
+end
+
+local function stopApplicationFastForward()
+  if sleepFastForward.timeScaled then
+    setApplicationTimeScale(needsConfig.sleep.fastForward.restoreTimeScale)
+    sleepFastForward.timeScaled = false
+  end
+end
+
+local function resetSleepFastForward()
+  stopApplicationFastForward()
+  sleepFastForward.mode = "idle"
+  sleepFastForward.requested = false
+  sleepFastForward.token = nil
+  sleepFastForward.confirmedToken = nil
+  sleepFastForward.probeElapsed = 0
+  sleepFastForward.recheckRemaining = 0
+  sleepFastForward.activationNotified = false
+  sleepFastForward.fallbackNotified = false
+end
+
+local function sendFastForwardProbe()
+  sleepFastForward.sequence = sleepFastForward.sequence + 1
+  sleepFastForward.token = string.format(
+    "%s-%s",
+    player.uniqueId(),
+    sleepFastForward.sequence
+  )
+  sleepFastForward.probeElapsed = 0
+
+  local ok = pcall(function()
+    world.sendEntityMessage(
+      "server",
+      "xneeds_v0.fastForwardProbe",
+      player.uniqueId(),
+      sleepFastForward.token
+    )
+  end)
+  if not ok then
+    sleepFastForward.token = nil
+    sleepFastForward.mode = "multiplayer"
+  end
+end
+
+local function onFastForwardState(_, _, token, allowed)
+  if type(token) ~= "string"
+      or (token ~= sleepFastForward.token
+        and token ~= sleepFastForward.confirmedToken) then
+    return
+  end
+
+  sleepFastForward.token = nil
+  sleepFastForward.probeElapsed = 0
+  sleepFastForward.recheckRemaining = needsConfig.sleep.fastForward.recheckSeconds
+  if allowed == true then
+    sleepFastForward.confirmedToken = token
+    sleepFastForward.mode = "singleplayer"
+  else
+    sleepFastForward.confirmedToken = nil
+    sleepFastForward.mode = "multiplayer"
+    stopApplicationFastForward()
+  end
+end
+
+local function pointInsideRect(point, rect)
+  return type(point) == "table"
+    and type(rect) == "table"
+    and point[1] >= rect[1]
+    and point[1] <= rect[3]
+    and point[2] >= rect[2]
+    and point[2] <= rect[4]
+end
+
+local function fastForwardButtonClicked()
+  if not hudCanvas
+      or not fastForwardButtonRect
+      or type(input) ~= "table"
+      or type(input.mouseDown) ~= "function" then
+    return false
+  end
+
+  local ok, clicks = pcall(input.mouseDown, "MouseLeft")
+  if not ok or type(clicks) ~= "table" or #clicks == 0 then
+    return false
+  end
+  local positionOk, mousePosition = pcall(function()
+    return hudCanvas:mousePosition()
+  end)
+  return positionOk and pointInsideRect(mousePosition, fastForwardButtonRect)
+end
+
+local function updateSleepFastForward(dt, sleeping)
+  local fastForward = needsConfig.sleep.fastForward
+  local primaryPlayer = isPrimaryPlayer()
+
+  if fastForward.enabled
+      and sleeping
+      and primaryPlayer
+      and fastForwardButtonClicked() then
+    if sleepFastForward.requested then
+      resetSleepFastForward()
+    else
+      sleepFastForward.requested = true
+    end
+  end
+
+  local canUse = fastForward.enabled
+    and sleeping
+    and primaryPlayer
+    and sleepFastForward.requested
+
+  if not sleeping then
+    if sleepFastForward.sleepWasActive then
+      resetSleepFastForward()
+    end
+    sleepFastForward.sleepWasActive = false
+    return 1
+  end
+
+  if not sleepFastForward.sleepWasActive then
+    sleepFastForward.sleepWasActive = true
+    if fastForward.enabled and fastForward.showMessages then
+      player.queueStatusMessage(string.format(
+        "Click the %.1fx SLEEP button to fast-forward.",
+        fastForward.timeScale
+      ))
+    end
+  end
+
+  if not canUse then
+    if sleepFastForward.mode ~= "idle" or sleepFastForward.timeScaled then
+      resetSleepFastForward()
+    end
+    return 1
+  end
+
+  if sleepFastForward.mode == "idle" then
+    sleepFastForward.mode = "pending"
+    sendFastForwardProbe()
+  end
+
+  if sleepFastForward.token then
+    sleepFastForward.probeElapsed = sleepFastForward.probeElapsed + dt
+    if sleepFastForward.probeElapsed >= fastForward.probeTimeoutSeconds then
+      sleepFastForward.token = nil
+      sleepFastForward.mode = "multiplayer"
+      sleepFastForward.recheckRemaining = fastForward.recheckSeconds
+      stopApplicationFastForward()
+    end
+  end
+
+  if sleepFastForward.mode == "singleplayer" then
+    if not sleepFastForward.timeScaled then
+      sleepFastForward.timeScaled = setApplicationTimeScale(fastForward.timeScale)
+      if not sleepFastForward.timeScaled then
+        sleepFastForward.mode = "multiplayer"
+      elseif fastForward.showMessages and not sleepFastForward.activationNotified then
+        player.queueStatusMessage(string.format(
+          "Sleep fast-forward: %.1fx.",
+          fastForward.timeScale
+        ))
+        sleepFastForward.activationNotified = true
+      end
+    end
+
+    sleepFastForward.recheckRemaining = sleepFastForward.recheckRemaining - dt
+    if sleepFastForward.recheckRemaining <= 0 and not sleepFastForward.token then
+      sleepFastForward.recheckRemaining = fastForward.recheckSeconds
+      sendFastForwardProbe()
+    end
+    return 1
+  end
+
+  if sleepFastForward.mode == "multiplayer" then
+    if fastForward.showMessages and not sleepFastForward.fallbackNotified then
+      player.queueStatusMessage(
+        "Multiplayer-safe sleep: only your Needs simulation is accelerated."
+      )
+      sleepFastForward.fallbackNotified = true
+    end
+    if fastForward.multiplayerFallbackEnabled then
+      sleepFastForward.recheckRemaining = sleepFastForward.recheckRemaining - dt
+      if sleepFastForward.recheckRemaining <= 0 and not sleepFastForward.token then
+        sleepFastForward.recheckRemaining = fastForward.recheckSeconds
+        sendFastForwardProbe()
+      end
+      return fastForward.multiplayerNeedsScale
+    end
+  end
+
+  return 1
+end
+
+local function bladderReliefRate()
+  if not player.isLounging() then
+    return 0
+  end
+
+  local loungeId = player.loungingIn()
+  local override = objectParameter(loungeId, needsConfig.bladder.reliefOverrideParameter)
+  if isFiniteNumber(override) then
+    return math.max(0, override)
+  end
+  if override == false then
+    return 0
+  end
+
+  if nameMatchesPatterns(objectName(loungeId), needsConfig.bladder.reliefObjectNamePatterns) then
+    return needsConfig.bladder.reliefRatePerSecond
+  end
+  return 0
+end
+
+local function resolveHygieneLiquidIds()
+  cleanLiquidIds = {}
+  dirtyLiquidIds = {}
+  liquidClassifications = {}
+
+  for _, liquidName in ipairs(needsConfig.hygiene.cleanLiquidNames) do
+    local ok, liquidId = pcall(root.liquidId, liquidName)
+    if ok and isFiniteNumber(liquidId) then
+      cleanLiquidIds[liquidId] = true
+    else
+      sb.logWarn("[xneeds_v0] unknown clean liquid name: %s", liquidName)
+    end
+  end
+
+  for _, liquidName in ipairs(needsConfig.hygiene.environment.dirtyLiquidNames) do
+    local ok, liquidId = pcall(root.liquidId, liquidName)
+    if ok and isFiniteNumber(liquidId) then
+      dirtyLiquidIds[liquidId] = true
+    else
+      sb.logWarn("[xneeds_v0] unknown dirty liquid name: %s", liquidName)
+    end
+  end
+end
+
+local function liquidNameAndClass(liquidId)
+  if liquidClassifications[liquidId] then
+    local cached = liquidClassifications[liquidId]
+    return cached.name, cached.class
+  end
+
+  local ok, liquidName = pcall(root.liquidName, liquidId)
+  if not ok or type(liquidName) ~= "string" then
+    liquidName = "unknown"
+  else
+    liquidName = string.lower(liquidName)
+  end
+
+  local classification = "neutral"
+  if cleanLiquidIds[liquidId] then
+    classification = "clean"
+  elseif dirtyLiquidIds[liquidId]
+      or nameMatchesPatterns(liquidName, needsConfig.hygiene.environment.dirtyLiquidNamePatterns) then
+    classification = "dirty"
+  else
+    local effectsOk, liquidEffects = pcall(root.liquidStatusEffects, liquidId)
+    if effectsOk and type(liquidEffects) == "table" then
+      for _, liquidEffect in ipairs(liquidEffects) do
+        local effectName = liquidEffect
+        if type(liquidEffect) == "table" then
+          effectName = liquidEffect.effect
+        end
+        if type(effectName) == "string"
+            and nameMatchesList(
+              string.lower(effectName),
+              needsConfig.hygiene.environment.dirtyLiquidStatusEffects
+            ) then
+          classification = "dirty"
+          break
+        end
+      end
+    end
+  end
+
+  liquidClassifications[liquidId] = {
+    name = liquidName,
+    class = classification
+  }
+  return liquidName, classification
+end
+
+local function loungeHygieneRecoveryRate()
+  if not player.isLounging() then
+    return 0
+  end
+
+  local loungeId = player.loungingIn()
+  local override = objectParameter(loungeId, needsConfig.hygiene.fixtureOverrideParameter)
+  if isFiniteNumber(override) then
+    return math.max(0, override)
+  end
+  if override == false then
+    return 0
+  end
+
+  if nameMatchesPatterns(objectName(loungeId), needsConfig.hygiene.loungeObjectNamePatterns) then
+    return needsConfig.hygiene.fixtureRecoveryPerSecond
+  end
+  return 0
+end
+
+local function nearbyActiveFixtureRecoveryRate()
+  local bestRate = 0
+  local objectIds = world.objectQuery(
+    mcontroller.position(),
+    needsConfig.hygiene.fixtureSearchRadius
+  )
+
+  for _, objectId in ipairs(objectIds) do
+    local override = objectParameter(objectId, needsConfig.hygiene.fixtureOverrideParameter)
+    if isFiniteNumber(override) then
+      bestRate = math.max(bestRate, math.max(0, override))
+    elseif override ~= false
+        and nameMatchesList(objectName(objectId), needsConfig.hygiene.activeFixtureObjectNames) then
+      bestRate = math.max(bestRate, needsConfig.hygiene.fixtureRecoveryPerSecond)
+    end
+  end
+  return bestRate
+end
+
+local function activeConfiguredStatusEffect(effectNames)
+  for _, effectName in ipairs(effectNames) do
+    if status.uniqueStatusEffectActive(effectName) then
+      return effectName
+    end
+  end
+end
+
+local function currentBiome()
+  local position = mcontroller.position()
+  local tilePosition = {math.floor(position[1]), math.floor(position[2])}
+  local ok, biomeName = pcall(world.biomeAt, tilePosition, true)
+  if ok and type(biomeName) == "string" then
+    return string.lower(biomeName)
+  end
+end
+
+local function environmentDecayMultiplier(biomeName)
+  local multiplier = needsConfig.hygiene.environment.biomeDecayMultipliers[biomeName] or 1
+  local ok, environmentEffects = pcall(world.environmentStatusEffects, mcontroller.position())
+  if ok and type(environmentEffects) == "table" then
+    for _, effectName in ipairs(environmentEffects) do
+      if type(effectName) == "string" then
+        multiplier = math.max(
+          multiplier,
+          needsConfig.hygiene.environment.environmentEffectDecayMultipliers[
+            string.lower(effectName)
+          ] or 1
+        )
+      end
+    end
+  end
+  return multiplier
+end
+
+local function hygieneEnvironment(elapsed)
+  local environment = needsConfig.hygiene.environment
+  local liquidPercentage = mcontroller.liquidPercentage()
+  local liquidName = "none"
+  local liquidClass = "none"
+
+  if liquidPercentage >= environment.minimumLiquidPercentage then
+    liquidName, liquidClass = liquidNameAndClass(mcontroller.liquidId())
+  end
+
+  local rate = loungeHygieneRecoveryRate()
+  if liquidClass == "clean"
+      and liquidPercentage >= needsConfig.hygiene.minimumLiquidPercentage then
+    rate = math.max(
+      rate,
+      needsConfig.hygiene.cleanLiquidRecoveryRates[liquidName]
+        or needsConfig.hygiene.waterRecoveryPerSecond
+    )
+  end
+  rate = math.max(rate, nearbyActiveFixtureRecoveryRate())
+
+  local rainEffect
+  if liquidPercentage < environment.minimumLiquidPercentage then
+    local undergroundOk, underground = pcall(world.underground, mcontroller.position())
+    if not undergroundOk or not underground then
+      rainEffect = activeConfiguredStatusEffect(environment.rainStatusEffects)
+      if rainEffect then
+        rate = math.max(rate, environment.rainRecoveryPerSecond)
+      end
+    end
+  end
+
+  local biomeName = currentBiome() or "none"
+  local decayMultiplier = environmentDecayMultiplier(biomeName)
+  local passiveLoss = needsConfig.hygiene.decayPerSecond * elapsed * decayMultiplier
+  local activityLoss = (
+    environment.runningExtraDecayPerSecond * pendingRunningSeconds
+      + environment.jumpingExtraDecayPerSecond * pendingJumpingSeconds
+  ) * decayMultiplier
+  local contaminationLoss = 0
+  if liquidClass == "dirty" then
+    contaminationLoss = environment.dirtyLiquidRatePerSecond
+      * liquidPercentage
+      * elapsed
+  end
+  local combatLoss = math.min(
+    pendingCombatDirtiness,
+    needsConfig.hygiene.combat.maximumLossPerUpdate
+  )
+
+  return {
+    biome = biomeName,
+    biomeMultiplier = decayMultiplier,
+    liquid = liquidName,
+    liquidClass = liquidClass,
+    liquidPercentage = liquidPercentage,
+    rainEffect = rainEffect,
+    recoveryRate = rate,
+    passiveLoss = passiveLoss,
+    activityLoss = activityLoss,
+    contaminationLoss = contaminationLoss,
+    combatLoss = combatLoss
+  }
+end
+
+local function pollCombatDirtiness()
+  local combat = needsConfig.hygiene.combat
+  local notifications
+
+  notifications, damageTakenHeartbeat = status.damageTakenSince(damageTakenHeartbeat)
+  for _, notification in ipairs(notifications) do
+    local healthLost = isFiniteNumber(notification.healthLost)
+      and math.max(0, notification.healthLost) or 0
+    if healthLost > 0 then
+      pendingCombatDirtiness = pendingCombatDirtiness
+        + combat.damageTakenBaseLoss
+        + healthLost * combat.damageTakenPerHealth
+    end
+  end
+
+  notifications, damageInflictedHeartbeat = status.inflictedDamageSince(damageInflictedHeartbeat)
+  for _, notification in ipairs(notifications) do
+    local damageDealt = isFiniteNumber(notification.damageDealt)
+      and math.max(0, notification.damageDealt) or 0
+    if damageDealt > 0 then
+      pendingCombatDirtiness = pendingCombatDirtiness
+        + combat.damageInflictedBaseLoss
+        + damageDealt * combat.damageInflictedPerDamage
+    end
+  end
+
+  pendingCombatDirtiness = math.min(
+    pendingCombatDirtiness,
+    combat.maximumLossPerUpdate
+  )
+end
+
+local function trackHygieneActivity(dt)
+  if mcontroller.running() then
+    pendingRunningSeconds = pendingRunningSeconds + dt
+  end
+  if mcontroller.jumping() then
+    pendingJumpingSeconds = pendingJumpingSeconds + dt
+  end
+end
+
+local function problemValue(needName)
+  if needName == "hygiene" then
+    return 100 - storage.needs.hygiene
+  end
+  return storage.needs[needName]
+end
+
+local function needLevel(value)
+  local level = 0
+  for index, threshold in ipairs(needsConfig.thresholds) do
+    if value >= threshold.value then
+      level = index
+    else
+      break
+    end
+  end
+  return level
+end
+
+local function refreshWarningLevels(notify)
+  for needName in pairs(needNames) do
+    local newLevel = needLevel(problemValue(needName))
+    local previousLevel = warningLevels[needName] or 0
+
+    if notify and needsConfig.warnings.enabled and newLevel > previousLevel then
+      local messages = needsConfig.warnings.messages[needName]
+      local key = needsConfig.thresholds[newLevel].key
+      local messageText = type(messages) == "table" and messages[key] or nil
+      if type(messageText) == "string" and messageText ~= "" then
+        player.queueStatusMessage(messageText)
+      end
+    end
+
+    warningLevels[needName] = newLevel
+  end
+end
+
+local function highestConsequenceLevel()
+  local level = 0
+  for needName in pairs(needNames) do
+    level = math.max(level, needLevel(problemValue(needName)))
+  end
+  return level
+end
+
+local function currentConsequences()
+  local result = {
+    levels = {},
+    speed = 1,
+    jump = 1,
+    power = 1,
+    energyRegen = 1,
+    protection = 1
+  }
+
+  for needName in pairs(needNames) do
+    local level = needLevel(problemValue(needName))
+    result.levels[needName] = level
+
+    if needsConfig.consequences.enabled and level > 0 then
+      local tierKey = needsConfig.thresholds[level].key
+      local profile = needsConfig.consequences.profiles[needName][tierKey]
+      for _, dimension in ipairs(consequenceDimensions) do
+        result[dimension] = result[dimension] * (profile[dimension] or 1)
+      end
+    end
+  end
+
+  if needsConfig.consequences.enabled then
+    for _, dimension in ipairs(consequenceDimensions) do
+      result[dimension] = math.max(
+        result[dimension],
+        needsConfig.consequences.minimumMultipliers[dimension]
+      )
+    end
+  end
+
+  return result
+end
+
+local function consequenceSignature(consequences)
+  return string.format(
+    "%.6f:%.6f:%.6f:%.6f:%.6f",
+    consequences.speed,
+    consequences.jump,
+    consequences.power,
+    consequences.energyRegen,
+    consequences.protection
+  )
+end
+
+local function applyConsequences()
+  local consequences = currentConsequences()
+
+  if consequences.speed < 1 or consequences.jump < 1 then
+    mcontroller.controlModifiers({
+      speedModifier = consequences.speed,
+      airJumpModifier = consequences.jump
+    })
+  end
+
+  local signature = consequenceSignature(consequences)
+  if appliedConsequenceSignature ~= signature then
+    local modifiers = {}
+    if consequences.power < 1 then
+      table.insert(modifiers, {
+        stat = "powerMultiplier",
+        effectiveMultiplier = consequences.power
+      })
+    end
+    if consequences.energyRegen < 1 then
+      table.insert(modifiers, {
+        stat = "energyRegenPercentageRate",
+        effectiveMultiplier = consequences.energyRegen
+      })
+    end
+    if consequences.protection < 1 then
+      table.insert(modifiers, {
+        stat = "protection",
+        effectiveMultiplier = consequences.protection
+      })
+    end
+
+    if #modifiers > 0 then
+      status.setPersistentEffects(consequenceCategory, modifiers)
+    else
+      status.clearPersistentEffects(consequenceCategory)
+    end
+    appliedConsequenceSignature = signature
+  end
+end
+
+local function caffeineActive()
+  local ok, active = pcall(
+    status.uniqueStatusEffectActive,
+    needsConfig.beverages.caffeineEffect
+  )
+  return ok and active == true
+end
+
+local function advanceNeeds(elapsed)
+  normalizeStorage()
+
+  if isSleeping() then
+    storage.needs.fatigue = storage.needs.fatigue
+      - needsConfig.fatigue.sleepRecoveryPerSecond * elapsed
+  else
+    local fatigueGainMultiplier = caffeineActive()
+      and needsConfig.beverages.caffeineAwakeGainMultiplier
+      or 1
+    storage.needs.fatigue = storage.needs.fatigue
+      + needsConfig.fatigue.awakeGainPerSecond * fatigueGainMultiplier * elapsed
+  end
+
+  storage.needs.thirst = storage.needs.thirst
+    + needsConfig.thirst.passiveGainPerSecond * elapsed
+
+  local reliefRate = bladderReliefRate()
+  if reliefRate > 0 then
+    storage.needs.bladder = storage.needs.bladder - reliefRate * elapsed
+  else
+    storage.needs.bladder = storage.needs.bladder
+      + needsConfig.bladder.passiveGainPerSecond * elapsed
+  end
+
+  local hygieneState = hygieneEnvironment(elapsed)
+  if hygieneState.recoveryRate > 0 then
+    storage.needs.hygiene = storage.needs.hygiene
+      + hygieneState.recoveryRate * elapsed
+  else
+    storage.needs.hygiene = storage.needs.hygiene
+      - hygieneState.passiveLoss
+  end
+  storage.needs.hygiene = storage.needs.hygiene
+    - hygieneState.activityLoss
+    - hygieneState.contaminationLoss
+    - hygieneState.combatLoss
+
+  lastHygieneEnvironment = hygieneState
+  pendingCombatDirtiness = math.max(0, pendingCombatDirtiness - hygieneState.combatLoss)
+  pendingRunningSeconds = 0
+  pendingJumpingSeconds = 0
+
+  for needName in pairs(needNames) do
+    storage.needs[needName] = clampNeed(storage.needs[needName])
+  end
+
+  if needsConfig.debug.logRecoveryEvents then
+    if reliefRate > 0 then
+      sb.logInfo("[xneeds_v0] bladder relief rate: %s", reliefRate)
+    end
+    if hygieneState.recoveryRate > 0 then
+      sb.logInfo("[xneeds_v0] hygiene recovery rate: %s", hygieneState.recoveryRate)
+    end
+    local environmentalLoss = hygieneState.activityLoss
+      + hygieneState.contaminationLoss
+      + hygieneState.combatLoss
+    if environmentalLoss > 0 then
+      sb.logInfo(
+        "[xneeds_v0] environmental hygiene loss: %s (activity %s, liquid %s, combat %s)",
+        environmentalLoss,
+        hygieneState.activityLoss,
+        hygieneState.contaminationLoss,
+        hygieneState.combatLoss
+      )
+    end
+  end
+
+  refreshWarningLevels(true)
+end
+
+local function itemDetails(itemName)
+  if type(itemName) ~= "string" or itemName == "" then
+    return nil
+  end
+
+  local ok, itemConfig = pcall(root.itemConfig, {name = itemName, count = 1})
+  if not ok or type(itemConfig) ~= "table" then
+    return nil
+  end
+
+  return {
+    parameters = type(itemConfig.parameters) == "table" and itemConfig.parameters or {},
+    config = type(itemConfig.config) == "table" and itemConfig.config or {}
+  }
+end
+
+local function configuredItemValue(itemName, details, parameterName, overrides, defaultValue)
+  local value = details.parameters[parameterName]
+  if value == nil then
+    value = details.config[parameterName]
+  end
+  if isFiniteNumber(value) then
+    return value, "item parameter " .. parameterName
+  elseif value == false then
+    return nil, "disabled by item parameter " .. parameterName
+  end
+
+  value = overrides[itemName]
+  if isFiniteNumber(value) then
+    return value, "item override map"
+  elseif value == false then
+    return nil, "disabled by item override map"
+  end
+  return defaultValue, "resolved profile"
+end
+
+local function appendBeverageEffectNames(parts, effects)
+  if type(effects) ~= "table" then
+    return
+  end
+
+  for _, group in ipairs(effects) do
+    if type(group) == "table" then
+      for _, descriptor in ipairs(group) do
+        if type(descriptor) == "string" then
+          table.insert(parts, descriptor)
+        elseif type(descriptor) == "table" and type(descriptor.effect) == "string" then
+          table.insert(parts, descriptor.effect)
+        end
+      end
+    end
+  end
+end
+
+local function beverageSearchText(itemName, details)
+  local parts = {itemName}
+  local textFields = {"shortdescription", "description"}
+  for _, field in ipairs(textFields) do
+    if type(details.parameters[field]) == "string" then
+      table.insert(parts, details.parameters[field])
+    end
+    if type(details.config[field]) == "string" then
+      table.insert(parts, details.config[field])
+    end
+  end
+  appendBeverageEffectNames(parts, details.parameters.effects)
+  appendBeverageEffectNames(parts, details.config.effects)
+  return " " .. string.lower(table.concat(parts, " ")) .. " "
+end
+
+local function beverageProfile(itemName, details)
+  local beverages = needsConfig.beverages
+  local explicit = details.parameters[beverages.profileParameter]
+  if explicit == nil then
+    explicit = details.config[beverages.profileParameter]
+  end
+
+  if explicit == false then
+    return beverages.defaultProfile,
+      beverages.profiles[beverages.defaultProfile],
+      "default forced by item parameter"
+  elseif type(explicit) == "string" and beverages.profiles[explicit] then
+    return explicit, beverages.profiles[explicit], "item parameter"
+  end
+
+  local mapped = beverages.itemProfiles[string.lower(itemName)]
+  if mapped and beverages.profiles[mapped] then
+    return mapped, beverages.profiles[mapped], "exact item mapping"
+  end
+
+  local searchText = beverageSearchText(itemName, details)
+  for _, rule in ipairs(beverages.classificationRules) do
+    for _, pattern in ipairs(rule.patterns) do
+      if string.find(searchText, string.lower(pattern), 1, true) then
+        return rule.profile,
+          beverages.profiles[rule.profile],
+          "classification rule: " .. pattern
+      end
+    end
+  end
+
+  return beverages.defaultProfile,
+    beverages.profiles[beverages.defaultProfile],
+    "default"
+end
+
+local function configuredBeverageValue(details, parameterName, defaultValue)
+  local value = details.parameters[parameterName]
+  if value == nil then
+    value = details.config[parameterName]
+  end
+  if isFiniteNumber(value) then
+    return value, "item parameter " .. parameterName
+  elseif value == false then
+    return 0, "disabled by item parameter " .. parameterName
+  end
+  return defaultValue, "resolved profile"
+end
+
+local function queueBeverageFeedback(profileName, thirstRecovery)
+  local feedback = needsConfig.beverages.feedback
+  if not feedback.enabled or beverageFeedbackCooldown > 0 then
+    return
+  end
+
+  local messageText = feedback.profileMessages[profileName]
+  if not messageText and isFiniteNumber(thirstRecovery) and thirstRecovery < 0 then
+    messageText = feedback.dehydratingMessage
+  end
+  if messageText then
+    player.queueStatusMessage(messageText)
+    beverageFeedbackCooldown = feedback.cooldownSeconds
+  end
+end
+
+local function onConsumedItem(_, isLocal, itemName)
+  -- The generated one-shot drink effect forwards the consumed item name here.
+  if not isLocal then
+    return
+  end
+
+  local details = itemDetails(itemName)
+  if not details then
+    return
+  end
+
+  local profileName, profile = beverageProfile(itemName, details)
+
+  local bladderGain = configuredItemValue(
+    itemName,
+    details,
+    needsConfig.bladder.overrideParameter,
+    needsConfig.bladder.itemOverrides,
+    profile.bladderGain
+  )
+  local thirstRecovery = configuredItemValue(
+    itemName,
+    details,
+    needsConfig.thirst.overrideParameter,
+    needsConfig.thirst.itemOverrides,
+    profile.thirstRecovery
+  )
+  local fatigueChange = configuredBeverageValue(
+    details,
+    needsConfig.beverages.fatigueChangeParameter,
+    profile.fatigueChange
+  )
+  local caffeineDuration = configuredBeverageValue(
+    details,
+    needsConfig.beverages.caffeineDurationParameter,
+    profile.caffeineDuration
+  )
+
+  if not isFiniteNumber(bladderGain)
+      and not isFiniteNumber(thirstRecovery)
+      and not isFiniteNumber(fatigueChange) then
+    return
+  end
+
+  normalizeStorage()
+  if isFiniteNumber(bladderGain) then
+    storage.needs.bladder = clampNeed(storage.needs.bladder + bladderGain)
+  end
+  if isFiniteNumber(thirstRecovery) then
+    storage.needs.thirst = clampNeed(storage.needs.thirst - thirstRecovery)
+  end
+  if isFiniteNumber(fatigueChange) then
+    storage.needs.fatigue = clampNeed(storage.needs.fatigue + fatigueChange)
+  end
+  if isFiniteNumber(caffeineDuration) and caffeineDuration > 0 then
+    status.addEphemeralEffect(
+      needsConfig.beverages.caffeineEffect,
+      caffeineDuration,
+      entity.id()
+    )
+  end
+  queueBeverageFeedback(profileName, thirstRecovery)
+  refreshWarningLevels(true)
+
+  if needsConfig.debug.logDrinkEvents then
+    sb.logInfo(
+      "[xneeds_v0] drink event: %s profile %s, bladder %+g, thirst recovery %+g, fatigue %+g, caffeine %gs",
+      itemName,
+      profileName,
+      bladderGain or 0,
+      thirstRecovery or 0,
+      fatigueChange or 0,
+      caffeineDuration or 0
+    )
+  end
+end
+
+local function localOnly(isLocal)
+  if not isLocal then
+    return {
+      ok = false,
+      error = "xneeds_v0 debug messages are local-only"
+    }
+  end
+end
+
+local function debugGet(_, isLocal)
+  local rejected = localOnly(isLocal)
+  if rejected then
+    return rejected
+  end
+
+  local result = needSnapshot()
+  result.ok = true
+  result.sleeping = isSleeping()
+  result.caffeinated = caffeineActive()
+  result.bladderReliefRate = bladderReliefRate()
+  local hygieneState = hygieneEnvironment(needsConfig.updateInterval)
+  result.hygieneRecoveryRate = hygieneState.recoveryRate
+  result.hygieneEnvironment = hygieneState
+  result.lastHygieneEnvironment = lastHygieneEnvironment
+  result.pendingCombatDirtiness = pendingCombatDirtiness
+  result.sleepFastForward = {
+    enabled = needsConfig.sleep.fastForward.enabled,
+    mode = sleepFastForward.mode,
+    wholeGameTimeScaled = sleepFastForward.timeScaled,
+    multiplayerFallbackEnabled = needsConfig.sleep.fastForward.multiplayerFallbackEnabled
+  }
+  local consequences = currentConsequences()
+  result.penaltyLevel = highestConsequenceLevel()
+  result.consequenceLevels = consequences.levels
+  result.consequenceMultipliers = {
+    speed = consequences.speed,
+    jump = consequences.jump,
+    power = consequences.power,
+    energyRegen = consequences.energyRegen,
+    protection = consequences.protection
+  }
+  return result
+end
+
+local function debugSet(_, isLocal, needName, value)
+  local rejected = localOnly(isLocal)
+  if rejected then
+    return rejected
+  end
+  if not needNames[needName] then
+    return {
+      ok = false,
+      error = "need must be thirst, fatigue, bladder, or hygiene"
+    }
+  end
+  if not isFiniteNumber(value) then
+    return {
+      ok = false,
+      error = "value must be a finite number"
+    }
+  end
+
+  normalizeStorage()
+  storage.needs[needName] = clampNeed(value)
+  refreshWarningLevels(false)
+
+  local result = needSnapshot()
+  result.ok = true
+  return result
+end
+
+local function debugReset(_, isLocal)
+  local rejected = localOnly(isLocal)
+  if rejected then
+    return rejected
+  end
+
+  storage.needs = migrateNeeds({})
+  pendingCombatDirtiness = 0
+  pendingRunningSeconds = 0
+  pendingJumpingSeconds = 0
+  lastHygieneEnvironment = {}
+  refreshWarningLevels(false)
+  local result = needSnapshot()
+  result.ok = true
+  return result
+end
+
+local function tierLabel(level)
+  if level <= 0 then
+    return "normal"
+  end
+  return needsConfig.thresholds[level].key
+end
+
+local function commandStatus()
+  normalizeStorage()
+  local consequences = currentConsequences()
+  local hygieneState = hygieneEnvironment(needsConfig.updateInterval)
+  return string.format(
+    "^#f3d36a;<Needs V1.5>^reset;\n"
+      .. "Thirst: ^cyan;%.1f^reset; [%s]\n"
+      .. "Fatigue: ^cyan;%.1f^reset; [%s]\n"
+      .. "Bladder: ^cyan;%.1f^reset; [%s]\n"
+      .. "Hygiene: ^cyan;%.1f^reset; (dirtiness %.1f) [%s]\n"
+      .. "Caffeinated: %s\n"
+      .. "Sleep fast-forward: %s%s\n"
+      .. "Multipliers: speed %.0f%%, jump %.0f%%, power %.0f%%, energy regen %.0f%%, protection %.0f%%\n"
+      .. "Environment: biome %s x%.2f, liquid %s (%s), rain/wet %s\n"
+      .. "Hygiene next tick: recovery +%.2f, passive -%.3f, activity -%.3f, liquid -%.3f, combat -%.3f",
+    storage.needs.thirst,
+    tierLabel(consequences.levels.thirst),
+    storage.needs.fatigue,
+    tierLabel(consequences.levels.fatigue),
+    storage.needs.bladder,
+    tierLabel(consequences.levels.bladder),
+    storage.needs.hygiene,
+    100 - storage.needs.hygiene,
+    tierLabel(consequences.levels.hygiene),
+    caffeineActive() and "yes" or "no",
+    sleepFastForward.mode,
+    sleepFastForward.timeScaled and " (whole game)" or "",
+    consequences.speed * 100,
+    consequences.jump * 100,
+    consequences.power * 100,
+    consequences.energyRegen * 100,
+    consequences.protection * 100,
+    hygieneState.biome,
+    hygieneState.biomeMultiplier,
+    hygieneState.liquid,
+    hygieneState.liquidClass,
+    hygieneState.rainEffect and "yes" or "no",
+    hygieneState.recoveryRate * needsConfig.updateInterval,
+    hygieneState.passiveLoss,
+    hygieneState.activityLoss,
+    hygieneState.contaminationLoss,
+    hygieneState.combatLoss
+  )
+end
+
+local function commandHelp(errorText)
+  local prefix = errorText and ("^red;" .. errorText .. "^reset;\n") or ""
+  return prefix
+    .. "^#f3d36a;</xneeds>^reset; local testing commands\n"
+    .. "^cyan;/xneeds get^reset;\n"
+    .. "^cyan;/xneeds set <thirst|fatigue|bladder|hygiene|dirtiness|all> <0-100>^reset;\n"
+    .. "^cyan;/xneeds add <need> <amount>^reset;\n"
+    .. "^cyan;/xneeds beverage <itemName>^reset;\n"
+    .. "^cyan;/xneeds preset <normal|noticeable|serious|urgent|critical>^reset;\n"
+    .. "^cyan;/xneeds reset^reset;"
+end
+
+local function commandNeedName(name)
+  name = type(name) == "string" and string.lower(name) or ""
+  if needNames[name] or name == "dirtiness" or name == "all" then
+    return name
+  end
+end
+
+local function setCommandNeed(name, value)
+  normalizeStorage()
+  value = clampNeed(value)
+
+  if name == "all" then
+    storage.needs.thirst = value
+    storage.needs.fatigue = value
+    storage.needs.bladder = value
+    storage.needs.hygiene = 100 - value
+  elseif name == "dirtiness" then
+    storage.needs.hygiene = 100 - value
+  else
+    storage.needs[name] = value
+  end
+  refreshWarningLevels(false)
+end
+
+local function addCommandNeed(name, amount)
+  normalizeStorage()
+  if name == "all" then
+    setCommandNeed("thirst", storage.needs.thirst + amount)
+    setCommandNeed("fatigue", storage.needs.fatigue + amount)
+    setCommandNeed("bladder", storage.needs.bladder + amount)
+    setCommandNeed("dirtiness", 100 - storage.needs.hygiene + amount)
+  elseif name == "dirtiness" then
+    setCommandNeed(name, 100 - storage.needs.hygiene + amount)
+  else
+    setCommandNeed(name, storage.needs[name] + amount)
+  end
+end
+
+local function beverageDiagnosticLine(label, value, source, invert)
+  if not isFiniteNumber(value) then
+    return string.format("%s: disabled [%s]", label, source or "unknown")
+  end
+  if invert then
+    value = -value
+  end
+  return string.format("%s: %+g [%s]", label, value, source or "unknown")
+end
+
+local function needsCommand(rawArguments)
+  local arguments = {}
+  for argument in string.gmatch(rawArguments or "", "%S+") do
+    table.insert(arguments, string.lower(argument))
+  end
+
+  local operation = arguments[1] or "get"
+  if operation == "get" then
+    return commandStatus()
+  elseif operation == "beverage" then
+    local itemName = arguments[2]
+    local details = itemDetails(itemName)
+    if not details then
+      return commandHelp("Unknown beverage item.")
+    end
+    local profileName, profile, profileSource = beverageProfile(itemName, details)
+    local bladderGain, bladderSource = configuredItemValue(
+      itemName,
+      details,
+      needsConfig.bladder.overrideParameter,
+      needsConfig.bladder.itemOverrides,
+      profile.bladderGain
+    )
+    local thirstRecovery, thirstSource = configuredItemValue(
+      itemName,
+      details,
+      needsConfig.thirst.overrideParameter,
+      needsConfig.thirst.itemOverrides,
+      profile.thirstRecovery
+    )
+    local fatigueChange, fatigueSource = configuredBeverageValue(
+      details,
+      needsConfig.beverages.fatigueChangeParameter,
+      profile.fatigueChange
+    )
+    local caffeineDuration, caffeineSource = configuredBeverageValue(
+      details,
+      needsConfig.beverages.caffeineDurationParameter,
+      profile.caffeineDuration
+    )
+    return string.format("Beverage %s\nProfile: %s [%s]\n%s\n%s\n%s\n%s",
+      itemName,
+      profileName,
+      profileSource,
+      beverageDiagnosticLine("Thirst", thirstRecovery, thirstSource, true),
+      beverageDiagnosticLine("Bladder", bladderGain, bladderSource, false),
+      beverageDiagnosticLine("Fatigue", fatigueChange, fatigueSource, false),
+      beverageDiagnosticLine("Caffeine seconds", caffeineDuration, caffeineSource, false)
+    )
+  elseif operation == "help" then
+    return commandHelp()
+  elseif operation == "reset" then
+    storage.needs = migrateNeeds({})
+    pendingCombatDirtiness = 0
+    pendingRunningSeconds = 0
+    pendingJumpingSeconds = 0
+    lastHygieneEnvironment = {}
+    refreshWarningLevels(false)
+    return "Needs reset.\n" .. commandStatus()
+  elseif operation == "preset" then
+    local presets = {
+      normal = 0,
+      noticeable = 50,
+      serious = 70,
+      urgent = 85,
+      critical = 95
+    }
+    local value = presets[arguments[2] or ""]
+    if value == nil then
+      return commandHelp("Unknown preset.")
+    end
+    setCommandNeed("all", value)
+    return string.format("Applied %s preset.\n%s", arguments[2], commandStatus())
+  elseif operation == "set" or operation == "add" then
+    local needName = commandNeedName(arguments[2])
+    local value = tonumber(arguments[3])
+    if not needName or not isFiniteNumber(value) then
+      return commandHelp("Missing or invalid need/value.")
+    end
+    if operation == "set" then
+      setCommandNeed(needName, value)
+    else
+      addCommandNeed(needName, value)
+    end
+    return commandStatus()
+  end
+
+  return commandHelp("Unknown operation.")
+end
+
+local function loadHudLayout()
+  local teamBar = root.assetJson("/interface/windowconfig/teambar.config")
+  local foodBar = teamBar
+    and teamBar.paneLayout
+    and teamBar.paneLayout.foodBar
+
+  if type(foodBar) ~= "table"
+      or type(foodBar.position) ~= "table"
+      or type(foodBar.size) ~= "table"
+      or not isFiniteNumber(foodBar.position[1])
+      or not isFiniteNumber(foodBar.position[2])
+      or not isFiniteNumber(foodBar.size[1])
+      or foodBar.size[1] <= 0 then
+    sb.logWarn("[xneeds_v0] HUD disabled: unable to derive placement from teambar.config foodBar")
+    return nil
+  end
+
+  local leftInset = math.min(
+    needsConfig.hud.leftInset,
+    math.max(0, foodBar.size[1] - 3)
+  )
+  return {
+    x = foodBar.position[1] + leftInset,
+    topOffset = foodBar.position[2] - needsConfig.hud.topGap,
+    width = foodBar.size[1] - leftInset
+  }
+end
+
+local function drawNeedBar(y, ratio, color, iconPath)
+  local x = hudLayout.x
+  local width = hudLayout.width
+  local height = needsConfig.hud.barHeight
+
+  hudCanvas:drawRect(
+    {x, y, x + width, y + height},
+    needsConfig.hud.borderColor
+  )
+
+  if width > 2 and height > 2 then
+    local innerLeft = x + 1
+    local innerBottom = y + 1
+    local innerWidth = width - 2
+    local innerTop = y + height - 1
+
+    hudCanvas:drawRect(
+      {innerLeft, innerBottom, innerLeft + innerWidth, innerTop},
+      needsConfig.hud.backgroundColor
+    )
+
+    local fillWidth = math.floor(innerWidth * clampNeed(ratio) / 100 + 0.5)
+    if fillWidth > 0 then
+      hudCanvas:drawRect(
+        {innerLeft, innerBottom, innerLeft + fillWidth, innerTop},
+        color
+      )
+    end
+  end
+
+  local iconSize = needsConfig.hud.iconSize
+  local iconCenter = {
+    x + width + needsConfig.hud.iconGap + iconSize / 2,
+    y + height / 2
+  }
+  hudCanvas:drawImage(
+    iconPath,
+    iconCenter,
+    needsConfig.hud.iconScale,
+    {255, 255, 255, 255},
+    true
+  )
+end
+
+local function drawFastForwardButton(y)
+  local fastForward = needsConfig.sleep.fastForward
+  local width = math.min(fastForward.buttonWidth, hudLayout.width)
+  local height = fastForward.buttonHeight
+  local x = hudLayout.x
+  fastForwardButtonRect = {x, y, x + width, y + height}
+
+  local mousePosition = hudCanvas:mousePosition()
+  local hovered = pointInsideRect(mousePosition, fastForwardButtonRect)
+  local fillColor = hovered and fastForward.buttonHoverColor
+    or fastForward.buttonColor
+  if sleepFastForward.requested then
+    fillColor = fastForward.buttonActiveColor
+  end
+
+  hudCanvas:drawRect(fastForwardButtonRect, needsConfig.hud.borderColor)
+  hudCanvas:drawRect(
+    {x + 1, y + 1, x + width - 1, y + height - 1},
+    fillColor
+  )
+
+  local scaleLabel = string.format("%.1fx", fastForward.timeScale)
+  scaleLabel = string.gsub(scaleLabel, "%.0x$", "x")
+  local label = scaleLabel .. " SLEEP"
+  if sleepFastForward.requested then
+    if sleepFastForward.mode == "pending" then
+      label = "CHECKING..."
+    elseif sleepFastForward.mode == "multiplayer" then
+      label = "STOP NEEDS"
+    else
+      label = "STOP " .. scaleLabel
+    end
+  end
+  hudCanvas:drawText(
+    label,
+    {
+      position = {x + width / 2, y + height / 2},
+      horizontalAnchor = "mid",
+      verticalAnchor = "mid"
+    },
+    7,
+    fastForward.buttonTextColor
+  )
+end
+
+local function drawHud(sleeping)
+  if not hudCanvas then
+    return
+  end
+
+  hudCanvas:clear()
+  fastForwardButtonRect = nil
+
+  local canvasSize = hudCanvas:size()
+  local height = needsConfig.hud.barHeight
+  local step = height + needsConfig.hud.barGap
+  local firstY = canvasSize[2] + hudLayout.topOffset - height
+
+  if needsConfig.hud.enabled then
+    drawNeedBar(
+      firstY,
+      storage.needs.thirst,
+      needsConfig.hud.thirstColor,
+      needsConfig.hud.icons.thirst
+    )
+    drawNeedBar(
+      firstY - step,
+      storage.needs.fatigue,
+      needsConfig.hud.fatigueColor,
+      needsConfig.hud.icons.fatigue
+    )
+    drawNeedBar(
+      firstY - step * 2,
+      storage.needs.bladder,
+      needsConfig.hud.bladderColor,
+      needsConfig.hud.icons.bladder
+    )
+    drawNeedBar(
+      firstY - step * 3,
+      100 - storage.needs.hygiene,
+      needsConfig.hud.hygieneColor,
+      needsConfig.hud.icons.hygiene
+    )
+  end
+
+  if sleeping
+      and isPrimaryPlayer()
+      and needsConfig.sleep.fastForward.enabled then
+    local occupiedRows = needsConfig.hud.enabled and 4 or 1
+    local buttonY = firstY
+      - step * (occupiedRows - 1)
+      - needsConfig.sleep.fastForward.buttonGap
+      - needsConfig.sleep.fastForward.buttonHeight
+    drawFastForwardButton(buttonY)
+  end
+end
+
+function init()
+  needsConfig = loadConfig()
+  normalizeStorage()
+  resolveHygieneLiquidIds()
+  _, damageTakenHeartbeat = status.damageTakenSince()
+  _, damageInflictedHeartbeat = status.inflictedDamageSince()
+  refreshWarningLevels(false)
+
+  if needsConfig.hud.enabled or needsConfig.sleep.fastForward.enabled then
+    hudLayout = loadHudLayout()
+    if hudLayout then
+      hudCanvas = interface.bindCanvas(needsConfig.hud.canvasName)
+      if not hudCanvas then
+        sb.logWarn("[xneeds_v0] HUD disabled: xStarbound canvas could not be bound")
+      end
+    end
+  end
+
+  message.setHandler("xneeds_v0.consume", onConsumedItem)
+  message.setHandler("xneeds_v0.get", debugGet)
+  message.setHandler("xneeds_v0.set", debugSet)
+  message.setHandler("xneeds_v0.reset", debugReset)
+  message.setHandler("xneeds_v0.fastForwardState", onFastForwardState)
+  if needsConfig.debug.commandsEnabled then
+    message.setHandler({
+      name = "/xneeds",
+      passName = false,
+      localOnly = true
+    }, needsCommand)
+  end
+
+  if needsConfig.debug.logInitialization then
+    sb.logInfo("[xneeds_v0] initialized storage schema %s", storage.needs.version)
+  end
+end
+
+function update(dt)
+  if not isFiniteNumber(dt) or dt <= 0 then
+    return
+  end
+
+  beverageFeedbackCooldown = math.max(0, beverageFeedbackCooldown - dt)
+
+  local sleeping = isSleeping()
+  local needsTimeScale = updateSleepFastForward(dt, sleeping)
+  local needsDt = dt * needsTimeScale
+
+  pollCombatDirtiness()
+  trackHygieneActivity(needsDt)
+
+  updateAccumulator = math.min(
+    updateAccumulator + needsDt,
+    needsConfig.maxCatchupSeconds
+  )
+
+  if updateAccumulator >= needsConfig.updateInterval then
+    local elapsed = updateAccumulator
+    updateAccumulator = 0
+    advanceNeeds(elapsed)
+  end
+
+  applyConsequences()
+  drawHud(sleeping)
+end
+
+function uninit()
+  stopApplicationFastForward()
+  status.clearPersistentEffects(consequenceCategory)
+  if hudCanvas then
+    hudCanvas:clear()
+  end
+  fastForwardButtonRect = nil
+end

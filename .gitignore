@@ -1,0 +1,20 @@
+# Packaged releases and local validation output
+*.pak
+*.pak.tmp
+
+# Logs, temporary files, and editor state
+*.log
+*.tmp
+*.bak
+*.swp
+.luacheckcache
+.vscode/
+.idea/
+
+# Operating-system metadata
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Local Codex validation artifacts
+.codex-*

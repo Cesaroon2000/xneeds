@@ -1,0 +1,11 @@
+{
+  "name" : "xneeds_v0",
+  "friendlyName" : "Needs V1.5",
+  "author" : "César",
+  "version" : "1.5.0",
+  "requires" : [ "xSBassets" ],
+  "scripts" : {
+    "postLoad" : [ "/scripts/xneeds_v0/register_drinks.lua" ]
+  },
+  "description" : "Persistent Thirst, Fatigue, Bladder, and Hygiene needs with recovery interactions, penalties, warnings, an adaptive HUD, and safe sleep fast-forward."
+}

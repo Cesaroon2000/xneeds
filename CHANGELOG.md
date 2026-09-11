@@ -1,0 +1,99 @@
+# Changelog
+
+All notable changes to Needs are documented here. Versions follow Semantic
+Versioning while the mod remains in active development.
+
+## [1.5.0] - 2026-09-11
+
+### Added
+
+- Native Starbound HUD artwork for Thirst, Fatigue, Bladder, and Hygiene.
+- Configurable icon paths, scale, logical size, and spacing.
+
+### Changed
+
+- Increased meter row spacing to prevent icon crowding while retaining thin
+  bars.
+
+## [1.4.1] - 2026-09-11
+
+### Added
+
+- Cooldown-controlled contextual feedback for caffeine, alcohol, salty, toxic,
+  and dehydrating drinks.
+- Detailed `/xneeds beverage <itemName>` profile and override diagnostics.
+- Explicit opt-in support for modded consumables outside the normal `drink`
+  category.
+
+### Fixed
+
+- Explicit FU beverage exceptions now receive their resolved profile defaults.
+
+## [1.4.0] - 2026-09-11
+
+### Added
+
+- Configurable beverage profiles for water, juice, milk, soda, caffeine,
+  alcohol, salty, toxic, and standard drinks.
+- Temporary caffeine effect with immediate Fatigue relief and suppressed awake
+  Fatigue accumulation.
+- Alcohol Fatigue, hydration, and bladder-pressure behavior.
+- Item parameters and exact mapping hooks for FU and Workshop compatibility.
+
+## [1.3.3] - 2026-09-11
+
+### Changed
+
+- Set optional sleep acceleration to 1.5x.
+- Tuned normal sleeping to recover full Fatigue in approximately five minutes.
+
+## [1.3.2] - 2026-09-11
+
+### Changed
+
+- Removed universe disconnect callbacks from the final design to avoid work
+  during save-and-quit teardown.
+- Temporarily reduced sleep acceleration to 2x and doubled base sleeping
+  recovery during tuning.
+
+## [1.3.1] - 2026-09-11
+
+### Changed
+
+- Replaced chat-based safety responses with silent direct world-server
+  messages, eliminating repeated empty chat entries.
+- Reduced initial sleep acceleration from 4x to 3x.
+- Increased Needs HUD simulation refresh frequency to four updates per game
+  second.
+
+## [1.3.0] - 2026-09-11
+
+### Added
+
+- Clickable sleep fast-forward control.
+- Single-player detection and multiplayer-safe Needs-only fallback.
+
+## [1.2.0] - 2026-09-11
+
+### Added
+
+- Hygiene changes from running, jumping, combat, rain, clean and dirty liquids,
+  biome conditions, and environmental effects.
+- Configurable shower, bath, and toilet recognition.
+
+## [1.1.0] - 2026-09-11
+
+### Added
+
+- Four configurable severity thresholds and crossing warnings.
+- Need-specific movement, jump, power, energy-regeneration, and protection
+  consequences with safety floors.
+- Local `/xneeds` testing commands.
+
+## [1.0.0] - 2026-09-11
+
+### Added
+
+- Persistent Thirst, Fatigue, Bladder, and Hygiene simulation.
+- Beverage consumption integration and recovery interactions.
+- Adaptive HUD meters anchored beneath the vanilla/FU hunger bar.
