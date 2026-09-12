@@ -111,10 +111,11 @@ Run `/xneeds options` to open a settings panel drawn over the HUD. It exposes
 HUD options (meters on/off, hover tooltips, compact bars, always-show values,
 threshold pulse, per-need bar visibility) and gameplay options (warnings,
 consequences, feedback, day/night fatigue, rested bonus, environment effects),
-plus a difficulty selector that scales passive gains and decay (Casual,
-Realistic, Hardcore). Choices are saved per character and applied immediately;
-use the Close button or `/xneeds options` again to close it. The config file
-supplies the defaults for a new character.
+plus difficulty and sleep recovery selectors. Difficulty scales passive gains
+and decay (Casual, Realistic, Hardcore); sleep recovery controls how fast
+sleeping restores Fatigue (Slow 0.5x, Normal 1x, Fast 2x). Choices are saved per
+character and applied immediately; use the Close button or `/xneeds options`
+again to close it. The config file supplies the defaults for a new character.
 
 ## Testing commands
 
@@ -165,9 +166,11 @@ asset sources.
 ## Sleeping
 
 Sleeping in a recognized bed accelerates Fatigue recovery so a full recharge
-takes about three minutes. The mod never changes the application time scale or
-sends chat commands, avoiding the interaction and save-and-quit problems that
-game-clock acceleration caused. Leaving the bed stops the recovery.
+takes about three minutes at the Normal setting. The Sleep recovery option in
+`/xneeds options` scales that rate (Slow 0.5x, Normal 1x, Fast 2x). The mod never
+changes the application time scale or sends chat commands, avoiding the
+interaction and save-and-quit problems that game-clock acceleration caused.
+Leaving the bed stops the recovery.
 
 ## Compatibility
 

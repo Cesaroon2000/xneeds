@@ -629,7 +629,8 @@ local function newGameplaySettings()
     circadian = needsConfig.fatigue.circadian.enabled ~= false,
     rested = needsConfig.fatigue.rested.enabled ~= false,
     environment = true,
-    rateScale = 1.0
+    rateScale = 1.0,
+    sleepSpeed = 1.0
   }
 end
 
@@ -676,6 +677,14 @@ end
 
 local function rateScale()
   local scale = gameplaySettings().rateScale
+  if not isFiniteNumber(scale) or scale <= 0 then
+    return 1
+  end
+  return scale
+end
+
+local function sleepRecoveryScale()
+  local scale = gameplaySettings().sleepSpeed
   if not isFiniteNumber(scale) or scale <= 0 then
     return 1
   end
@@ -1338,7 +1347,7 @@ local function advanceNeeds(elapsed)
 
   if isSleeping() then
     storage.needs.fatigue = storage.needs.fatigue
-      - needsConfig.fatigue.sleepRecoveryPerSecond * elapsed
+      - needsConfig.fatigue.sleepRecoveryPerSecond * sleepRecoveryScale() * elapsed
   else
     local fatigueGainMultiplier = 1
     if caffeineActive() then
@@ -1770,7 +1779,8 @@ local function debugGet(_, isLocal)
     circadian = gameplay.circadian,
     rested = gameplay.rested,
     environment = gameplay.environment,
-    rateScale = gameplay.rateScale
+    rateScale = gameplay.rateScale,
+    sleepSpeed = gameplay.sleepSpeed
   }
   local consequences = currentConsequences()
   result.penaltyLevel = highestConsequenceLevel()
@@ -1850,7 +1860,7 @@ local function commandStatus()
       .. "Circadian: %s, rested %s\n"
       .. "Multipliers: speed %.0f%%, jump %.0f%%, power %.0f%%, energy regen %.0f%%, protection %.0f%%\n"
       .. "Environment: biome %s x%.2f, thirst gain x%.2f, fatigue gain x%.2f, liquid %s (%s), rain/wet %s\n"
-      .. "Settings: difficulty x%.2f, warnings %s, consequences %s, feedback %s, circadian %s, rested %s, environment %s\n"
+      .. "Settings: difficulty x%.2f, sleep x%.2f, warnings %s, consequences %s, feedback %s, circadian %s, rested %s, environment %s\n"
       .. "Hygiene next tick: recovery +%.2f, passive -%.3f, activity -%.3f, liquid -%.3f, combat -%.3f",
     storage.needs.thirst,
     tierLabel(consequences.levels.thirst),
@@ -1879,6 +1889,7 @@ local function commandStatus()
     hygieneState.liquidClass,
     hygieneState.rainEffect and "yes" or "no",
     gameplaySettings().rateScale,
+    gameplaySettings().sleepSpeed,
     gameplaySettings().warnings and "on" or "off",
     gameplaySettings().consequences and "on" or "off",
     gameplaySettings().feedback and "on" or "off",
@@ -2663,6 +2674,12 @@ local difficultyOptions = {
   { label = "Hardcore", value = 1.5 }
 }
 
+local sleepSpeedOptions = {
+  { label = "Slow", value = 0.5 },
+  { label = "Normal", value = 1.0 },
+  { label = "Fast", value = 2.0 }
+}
+
 local function settingsTable(name)
   if name == "gameplay" then
     return gameplaySettings()
@@ -2689,12 +2706,13 @@ local function buildSettingsRows()
     { kind = "toggle", label = "Day/night fatigue", table = "gameplay", key = "circadian" },
     { kind = "toggle", label = "Rested bonus", table = "gameplay", key = "rested" },
     { kind = "toggle", label = "Environment effects", table = "gameplay", key = "environment" },
-    { kind = "cycle", label = "Difficulty", table = "gameplay", key = "rateScale" }
+    { kind = "cycle", label = "Difficulty", table = "gameplay", key = "rateScale", options = difficultyOptions },
+    { kind = "cycle", label = "Sleep recovery", table = "gameplay", key = "sleepSpeed", options = sleepSpeedOptions }
   }
 end
 
-local function difficultyLabel(value)
-  for _, option in ipairs(difficultyOptions) do
+local function cycleLabel(options, value)
+  for _, option in ipairs(options) do
     if math.abs(option.value - value) < 0.001 then
       return option.label
     end
@@ -2702,19 +2720,19 @@ local function difficultyLabel(value)
   return string.format("%.2f", value)
 end
 
-local function advanceDifficulty(value)
+local function advanceCycle(options, value)
   local current = 1
-  for index, option in ipairs(difficultyOptions) do
+  for index, option in ipairs(options) do
     if math.abs(option.value - value) < 0.001 then
       current = index
       break
     end
   end
   local nextIndex = current + 1
-  if nextIndex > #difficultyOptions then
+  if nextIndex > #options then
     nextIndex = 1
   end
-  return difficultyOptions[nextIndex].value
+  return options[nextIndex].value
 end
 
 local settingsRowRects = {}
@@ -2799,7 +2817,7 @@ local function drawSettingsOverlay()
           )
         end
       else
-        label = row.label .. ": " .. difficultyLabel(target[row.key])
+        label = row.label .. ": " .. cycleLabel(row.options, target[row.key])
       end
 
       hudCanvas:drawText(
@@ -2884,7 +2902,7 @@ local function handleSettingsClick()
         if row.kind == "toggle" then
           target[row.key] = not target[row.key]
         else
-          target[row.key] = advanceDifficulty(target[row.key])
+          target[row.key] = advanceCycle(row.options, target[row.key])
         end
       end
       return

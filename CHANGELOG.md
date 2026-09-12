@@ -3,6 +3,14 @@
 All notable changes to Needs are documented here. Versions follow Semantic
 Versioning while the mod remains in active development.
 
+## [Unreleased]
+
+### Added
+
+- Sleep recovery selector in the settings overlay (Slow 0.5x, Normal 1x, Fast
+  2x) that scales how quickly sleeping restores Fatigue. It is saved per
+  character and reported by `/xneeds get`.
+
 ## [1.13.0] - 2026-09-11
 
 ### Added

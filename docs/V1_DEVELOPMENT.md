@@ -218,8 +218,9 @@ the sleep emote, under a configured bed effect, or lounging in an object whose
 /xneeds_v0.config.
 
 While sleeping, Fatigue recovers at `fatigue.sleepRecoveryPerSecond`, tuned so a
-full 0-to-100 recharge takes about three minutes. Awake Fatigue gain is
-unaffected, and caffeine still pauses awake gain.
+full 0-to-100 recharge takes about three minutes at Normal. The Sleep recovery
+setting in the options overlay multiplies that rate (Slow 0.5x, Normal 1x, Fast
+2x). Awake Fatigue gain is unaffected, and caffeine still pauses awake gain.
 
 Sleep acceleration and all application time-scale changes were removed in V1.7.
 Earlier builds changed the whole-game `/timescale` and, in multiplayer, ran a
