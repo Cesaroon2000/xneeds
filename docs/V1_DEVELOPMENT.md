@@ -455,6 +455,13 @@ scripts are not edited.
 FrackinInterface and FU may continue to own teambar.config and its textures
 because Needs reads the effective geometry without patching it.
 
+Needs requires xStarbound. The player script's `init` checks for the xStarbound
+canvas and `root.assetsByExtension`; if either is missing (stock Starbound) it
+logs one warning and returns, and `update`/`uninit` no-op while `needsConfig` is
+unset. This avoids error spam on unsupported clients. Because the post-load
+preprocessor is xStarbound-only, drink and food registration also never happens
+without it, so OpenStarbound and StarExtensions are only partially compatible.
+
 ## Integrating other mods
 
 Needs is written so another mod can add drinks, foods, and fixtures from its own

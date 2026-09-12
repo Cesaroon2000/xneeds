@@ -2961,7 +2961,16 @@ local function drawHud(sleeping)
   end
 end
 
+local function xStarboundAvailable()
+  return type(interface) == "table" and type(root.assetsByExtension) == "function"
+end
+
 function init()
+  if not xStarboundAvailable() then
+    sb.logWarn("[xneeds_v0] xStarbound is required; Needs is disabled on this client.")
+    return
+  end
+
   needsConfig = loadConfig()
   normalizeStorage()
   resolveHygieneLiquidIds()
@@ -2996,6 +3005,9 @@ function init()
 end
 
 function update(dt)
+  if not needsConfig then
+    return
+  end
   if not isFiniteNumber(dt) or dt <= 0 then
     return
   end
@@ -3034,6 +3046,9 @@ function update(dt)
 end
 
 function uninit()
+  if not needsConfig then
+    return
+  end
   status.clearPersistentEffects(consequenceCategory)
   if hudCanvas then
     hudCanvas:clear()

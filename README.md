@@ -13,9 +13,10 @@ Current version: **1.13.0**
 - Starbound running through xStarbound.
 - The bundled `xSBassets` dependency.
 
-This mod uses xStarbound-specific player contexts, full-window canvases, world
-server messaging, and post-load asset processing. Stock Starbound is not
-supported.
+This mod uses xStarbound-specific player contexts, full-window canvases,
+post-load asset processing, and slash-command handlers. Stock Starbound and
+OpenStarbound are not supported. On a client without xStarbound the player
+script logs a single warning and disables itself instead of running.
 
 ## Features
 
@@ -185,6 +186,16 @@ game-clock acceleration caused. Leaving the bed stops the recovery.
   `needsThirstValue`, `needsBladderValue`, `needsFatigueChange`, and
   `needsCaffeineDuration`. See the integrating section in
   [`docs/V1_DEVELOPMENT.md`](docs/V1_DEVELOPMENT.md).
+
+Host requirements:
+
+- **xStarbound + Frackin' Universe, or xStarbound alone:** fully supported.
+- **Stock Starbound (with or without FU):** unsupported. The post-load script
+  never runs, so drinks and foods are not registered, and the player script
+  detects the missing xStarbound APIs and disables itself with one log warning
+  instead of erroring.
+- **OpenStarbound / StarExtensions:** partially compatible at best, because the
+  post-load asset preprocessor is xStarbound-only.
 
 ## Safe removal
 
