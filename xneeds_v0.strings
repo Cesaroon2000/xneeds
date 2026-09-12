@@ -8,7 +8,7 @@
     "hygiene" : "Dirtiness rises with running, jumping, combat, dirty liquids, and harsh biomes. Clean water, rain, showers, and baths restore Hygiene. Lounging on a toilet relieves Bladder. Environmental multipliers default to 1 for unknown biomes.",
     "sleep" : "Sleep in a bed to restore Fatigue in about three minutes. A long enough sleep grants a Rested bonus that slows awake Fatigue gain. Day/night and hot or cold biomes also affect Thirst and Fatigue. Needs never change the game speed.",
     "settings" : "Run /xneeds options to open the in-game settings panel. It controls HUD options, gameplay toggles (warnings, consequences, feedback, day/night fatigue, rested bonus, environment effects), and the difficulty preset.",
-    "commands" : "Use /xneeds help commands for the full command list."
+    "commands" : "^#f3d36a;<Needs commands>^reset; Local testing and diagnostics:"
   },
   "settings" : {
     "helpHint" : "Type /xneeds help for details"

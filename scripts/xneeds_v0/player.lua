@@ -1931,7 +1931,7 @@ local function needsHelp(topic)
     )
   end
   if topic == "commands" then
-    return commandHelp()
+    return stringFor("help.commands", "Commands:") .. "\n" .. commandHelp()
   end
   local text = stringFor("help." .. topic, nil)
   if text then
@@ -2335,8 +2335,11 @@ end
 
 local function tierHudColor(level)
   local key = level <= 0 and "normal" or needsConfig.thresholds[level].key
-  return needsConfig.hud.tooltips.tierColors[key]
-    or needsConfig.hud.tooltips.textColor
+  local tooltips = needsConfig.hud.tooltips
+  if type(tooltips) == "table" and type(tooltips.tierColors) == "table" then
+    return tooltips.tierColors[key] or tooltips.textColor or needsConfig.hud.borderColor
+  end
+  return needsConfig.hud.borderColor
 end
 
 local function needRecoveryState(needName, sleeping)
