@@ -6,6 +6,8 @@ Universe HUD.
 
 Current version: **1.6.0**
 
+![Needs HUD preview](_previewimage.png)
+
 ## Requirements
 
 - Starbound running through xStarbound.
@@ -160,5 +162,4 @@ files are intentionally ignored by Git.
 
 ## License
 
-No license has been selected yet. Add a `LICENSE` file before distributing the
-source publicly so reuse permissions are explicit.
+Released under the [MIT License](LICENSE).

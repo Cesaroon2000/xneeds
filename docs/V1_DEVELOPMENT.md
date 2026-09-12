@@ -333,3 +333,49 @@ Object and item extension parameters are optional and uniquely prefixed. V1 adds
 no new furniture, consumables, effect-status icons, menus, sounds, or
 animations. The four Needs meter icons are HUD-only uses of existing vanilla
 artwork.
+
+## Singleplayer validation checklist
+
+Run these after any change to script, config, or generated patches. Everything
+here is singleplayer only; multiplayer is out of scope for V1.
+
+Persistence and teardown:
+
+1. Load an existing character and confirm Thirst, Fatigue, Bladder, and Hygiene
+   restore and the HUD appears with no red script errors.
+2. Force each need into a penalty tier, save, and quit. Confirm the game exits
+   promptly with no hang and no error during universe shutdown.
+3. Reload the character. Confirm needs, warning tiers, and the namespaced
+   modifier category are consistent and the HUD returns.
+
+Sleep and time:
+
+1. Sleep in a bed and confirm the `1.5x SLEEP` button appears.
+2. Click it, let it activate, then wake. Run `/timescale` and confirm it is back
+   to `1.000000`.
+3. Confirm normal sleeping still restores Fatigue in roughly five minutes.
+4. Confirm a caffeine drink counts down from `5:00` at 1x wall-clock while
+   `/xneeds get` reports `Caffeinated: yes (m:ss remaining)`.
+
+Recovery and environment:
+
+1. Lounge on a toilet and confirm Bladder drops at the configured rate.
+2. Stand in clean water and in an active shower/bath and confirm Hygiene rises
+   and the hover tooltip names the recovery source.
+3. Take damage and run/jump and confirm Dirtiness rises without unbounded spikes.
+
+Beverages and HUD:
+
+1. Run `/xneeds beverages` and confirm it reports `default fallbacks (0)`.
+2. Spot-check water, coffee, soda, alcohol, salty, and toxic examples with
+   `/xneeds beverage <itemName>`.
+3. Hover each need meter and confirm name, value, tier, recovery, and penalty
+   rows are correct and do not overlap the status row or the sleep button.
+4. Change interface scale and window size and confirm the meters and tooltips
+   stay aligned.
+
+Safe removal:
+
+1. Set `consequences.enabled` to `false`, load the penalized character once, and
+   save and quit cleanly so `xneeds_v1_penalties` is cleared.
+2. Remove the mod and confirm the character loads without leftover modifiers.
