@@ -3,6 +3,17 @@
 All notable changes to Needs are documented here. Versions follow Semantic
 Versioning while the mod remains in active development.
 
+## [1.13.0] - 2026-09-11
+
+### Added
+
+- In-game help: `/xneeds help` lists topics and `/xneeds help <topic>` explains
+  needs, tiers, drinks, foods, hygiene, sleep, settings, and commands. The
+  settings panel shows a help hint.
+- Localizable string table at `/xneeds_v0.strings` holding the help text and
+  system messages, loadable independently of `xneeds_v0.config` so translations
+  can patch or replace it without touching gameplay tuning.
+
 ## [1.12.0] - 2026-09-11
 
 ### Added

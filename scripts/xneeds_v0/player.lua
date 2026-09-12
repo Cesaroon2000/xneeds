@@ -56,6 +56,30 @@ local function formatDuration(seconds)
   return string.format("%d:%02d", math.floor(seconds / 60), seconds % 60)
 end
 
+local localizedStrings
+
+local function strings()
+  if localizedStrings == nil then
+    local ok, value = pcall(root.assetJson, "/xneeds_v0.strings")
+    localizedStrings = ok and type(value) == "table" and value or {}
+  end
+  return localizedStrings
+end
+
+local function stringFor(path, default)
+  local node = strings()
+  for part in string.gmatch(path, "[^.]+") do
+    if type(node) ~= "table" then
+      return default
+    end
+    node = node[part]
+  end
+  if type(node) == "string" and node ~= "" then
+    return node
+  end
+  return default
+end
+
 local function requireNumber(value, path)
   if not isFiniteNumber(value) then
     error(string.format("[xneeds_v0] %s must be a finite number", path))
@@ -1299,7 +1323,7 @@ local function trackSleepRest(sleeping, dt)
         and sleepAccumulatedSeconds >= rested.minimumSleepSeconds then
       status.addEphemeralEffect(rested.effect, rested.durationSeconds, entity.id())
       if rested.message ~= "" then
-        player.queueStatusMessage(rested.message)
+        player.queueStatusMessage(stringFor("messages.rested", rested.message))
       end
     end
     sleepAccumulatedSeconds = 0
@@ -1817,7 +1841,7 @@ local function commandStatus()
   local consequences = currentConsequences()
   local hygieneState = hygieneEnvironment(needsConfig.updateInterval)
   return string.format(
-    "^#f3d36a;<Needs V1.12>^reset;\n"
+    "^#f3d36a;<Needs V1.13>^reset;\n"
       .. "Thirst: ^cyan;%.1f^reset; [%s]\n"
       .. "Fatigue: ^cyan;%.1f^reset; [%s]\n"
       .. "Bladder: ^cyan;%.1f^reset; [%s]\n"
@@ -1881,8 +1905,41 @@ local function commandHelp(errorText)
     .. "^cyan;/xneeds food <itemName>^reset;\n"
     .. "^cyan;/xneeds foods [all|details|<profile>|<text>]^reset;\n"
     .. "^cyan;/xneeds options^reset;\n"
+    .. "^cyan;/xneeds help [needs|tiers|drinks|foods|hygiene|sleep|settings|commands]^reset;\n"
     .. "^cyan;/xneeds preset <normal|noticeable|serious|urgent|critical>^reset;\n"
     .. "^cyan;/xneeds reset^reset;"
+end
+
+local helpTopics = {
+  "needs",
+  "tiers",
+  "drinks",
+  "foods",
+  "hygiene",
+  "sleep",
+  "settings",
+  "commands"
+}
+
+local function needsHelp(topic)
+  if type(topic) ~= "string" or topic == "" then
+    return stringFor(
+      "help.overview",
+      "Type /xneeds help <topic>. Topics: "
+        .. table.concat(helpTopics, ", ")
+        .. "."
+    )
+  end
+  if topic == "commands" then
+    return commandHelp()
+  end
+  local text = stringFor("help." .. topic, nil)
+  if text then
+    return text
+  end
+  return commandHelp(
+    "Unknown help topic. Topics: " .. table.concat(helpTopics, ", ")
+  )
 end
 
 local function commandNeedName(name)
@@ -2177,7 +2234,7 @@ local function needsCommand(rawArguments)
     local itemName = arguments[2]
     local details = itemDetails(itemName)
     if not details then
-      return commandHelp("Unknown beverage item.")
+      return commandHelp(stringFor("messages.unknownBeverage", "Unknown beverage item."))
     end
     local profileName, profile, profileSource = beverageProfile(itemName, details)
     return consumableDiagnostic("Beverage", itemName, profileName, profile, profileSource)
@@ -2185,7 +2242,7 @@ local function needsCommand(rawArguments)
     local itemName = arguments[2]
     local details = itemDetails(itemName)
     if not details then
-      return commandHelp("Unknown food item.")
+      return commandHelp(stringFor("messages.unknownFood", "Unknown food item."))
     end
     local profileName, profile, profileSource = foodProfile(itemName, details)
     return consumableDiagnostic("Food", itemName, profileName, profile, profileSource)
@@ -2196,11 +2253,14 @@ local function needsCommand(rawArguments)
   elseif operation == "options" then
     settingsOpen = not settingsOpen
     if settingsOpen then
-      return "Needs settings opened. Use the Close button or /xneeds options to close."
+      return stringFor(
+        "messages.settingsOpened",
+        "Needs settings opened. Use the Close button or /xneeds options to close."
+      )
     end
-    return "Needs settings closed."
+    return stringFor("messages.settingsClosed", "Needs settings closed.")
   elseif operation == "help" then
-    return commandHelp()
+    return needsHelp(arguments[2])
   elseif operation == "reset" then
     storage.needs = migrateNeeds({})
     pendingCombatDirtiness = 0
@@ -2208,7 +2268,7 @@ local function needsCommand(rawArguments)
     pendingJumpingSeconds = 0
     lastHygieneEnvironment = {}
     refreshWarningLevels(false)
-    return "Needs reset.\n" .. commandStatus()
+    return stringFor("messages.reset", "Needs reset.") .. "\n" .. commandStatus()
   elseif operation == "preset" then
     local presets = {
       normal = 0,
@@ -2219,7 +2279,7 @@ local function needsCommand(rawArguments)
     }
     local value = presets[arguments[2] or ""]
     if value == nil then
-      return commandHelp("Unknown preset.")
+      return commandHelp(stringFor("messages.unknownPreset", "Unknown preset."))
     end
     setCommandNeed("all", value)
     return string.format("Applied %s preset.\n%s", arguments[2], commandStatus())
@@ -2227,7 +2287,7 @@ local function needsCommand(rawArguments)
     local needName = commandNeedName(arguments[2])
     local value = tonumber(arguments[3])
     if not needName or not isFiniteNumber(value) then
-      return commandHelp("Missing or invalid need/value.")
+      return commandHelp(stringFor("messages.missingValue", "Missing or invalid need/value."))
     end
     if operation == "set" then
       setCommandNeed(needName, value)
@@ -2237,7 +2297,7 @@ local function needsCommand(rawArguments)
     return commandStatus()
   end
 
-  return commandHelp("Unknown operation.")
+  return commandHelp(stringFor("messages.unknownOperation", "Unknown operation."))
 end
 
 local tooltipNeedOrder = { "thirst", "fatigue", "bladder", "hygiene" }
@@ -2663,7 +2723,7 @@ local function settingsLayout(rowCount)
   local rowHeight = 15
   local padding = 12
   local titleHeight = 22
-  local closeArea = 28
+  local closeArea = 42
   local height = titleHeight + rowCount * rowHeight + closeArea + padding
   local left = math.floor((canvasSize[1] - width) / 2)
   local bottom = math.floor((canvasSize[2] - height) / 2)
@@ -2753,6 +2813,16 @@ local function drawSettingsOverlay()
   end
 
   local closeTop = bottom + padding + 16
+  hudCanvas:drawText(
+    stringFor("settings.helpHint", "Type /xneeds help for details"),
+    {
+      position = {left + width / 2, closeTop + 8},
+      horizontalAnchor = "mid",
+      verticalAnchor = "mid"
+    },
+    7,
+    needsConfig.hud.borderColor
+  )
   settingsCloseRect = {
     left + width / 2 - 30,
     closeTop - 16,

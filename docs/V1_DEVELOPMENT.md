@@ -1,4 +1,4 @@
-# Needs V1.12.0 development notes
+# Needs V1.13.0 development notes
 
 ## Architecture and persistence
 
@@ -349,6 +349,25 @@ mouse position, so a click that toggles a row can also reach the world as a
 normal left-click. Open the panel when not aiming at anything important. The
 panel itself never replaces or blocks vanilla input.
 
+## Help and localization
+
+`/xneeds help [topic]` prints an overview plus a topic page for `needs`, `tiers`,
+`drinks`, `foods`, `hygiene`, `sleep`, `settings`, or `commands`. The settings
+panel shows a `Type /xneeds help for details` hint.
+
+All help text and the remaining hard-coded system messages live in
+`/xneeds_v0.strings` (JSON). The player script loads it once through
+`root.assetJson` and resolves values with `stringFor(path, default)`; if the
+asset is missing or a key is absent, the built-in English default is used so the
+mod still works. The config still holds gameplay tuning and the warning,
+beverage/food feedback, and rested messages; the strings file covers help and
+the command/system messages.
+
+Translations can ship as an asset patch on `/xneeds_v0.strings` from their own
+mod source, or as a replacement source loaded after this one. Because the loader
+falls back per key, a translation only needs the keys it changes. This is
+documented for other authors in the integrating section.
+
 ## Debug commands
 
 The local xStarbound slash command is enabled by debug.commandsEnabled:
@@ -374,6 +393,8 @@ The local xStarbound slash command is enabled by debug.commandsEnabled:
     /xneeds foods details
     /xneeds foods juicy
     /xneeds options
+    /xneeds help
+    /xneeds help drinks
     /xneeds preset normal
     /xneeds preset noticeable
     /xneeds preset serious
@@ -505,6 +526,15 @@ The `/xneeds beverages details` and `/xneeds foods details` audits report each
 item's profile, resolution source, asset path, and source mod, which is the
 fastest way to confirm how a given item is treated.
 
+### Localization
+
+Translators can provide an asset patch on `/xneeds_v0.strings` from their own
+mod to translate the help text and system messages, or ship a replacement
+source loaded after this one. Because `stringFor` falls back per key, only the
+translated keys are required. Gameplay messages that live in
+`xneeds_v0.config` (warnings, beverage/food feedback, rested message) can be
+patched the same way.
+
 Object and item extension parameters are optional and uniquely prefixed. V1 adds
 no new furniture, consumables, effect-status icons, menus, sounds, or
 animations. The four Needs meter icons are HUD-only uses of existing vanilla
@@ -575,6 +605,13 @@ Settings overlay:
    that passive gains change accordingly.
 5. Save and quit, then reload, and confirm all settings persisted.
 6. Close with the button and with `/xneeds options`.
+
+Help and strings:
+
+1. Run `/xneeds help` and confirm the topic list, then `/xneeds help <topic>`
+   for each topic.
+2. Temporarily patch a key in `/xneeds_v0.strings` and confirm the changed text
+   appears, then remove the patch and confirm the built-in default returns.
 
 Safe removal:
 
