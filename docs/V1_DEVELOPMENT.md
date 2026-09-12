@@ -77,7 +77,13 @@ Default profiles are deliberately conservative starting points:
 While the invisible `xneeds_caffeinated` effect is active, awake Fatigue gain
 uses the configured multiplier, zero by default. Coffee therefore gives an
 immediate temporary reduction and pauses further awake accumulation for five
-minutes; it does not interfere with the item's existing effects. Alcohol makes
+minutes; it does not interfere with the item's existing effects. While the
+effect is active, the `xneeds_caffeinated` effect script reports its own
+remaining `effect.duration()` to the player script, which shows it in
+`/xneeds get` and the Fatigue hover tooltip as m:ss. The readout therefore
+follows the real status effect rather than a second countdown that could drift
+from the game clock. The configured caffeine duration only seeds the display
+until the first report arrives. Alcohol makes
 the player somewhat more tired, provides little hydration, and fills the
 Bladder more strongly. Salty and toxic profiles increase Thirst.
 
@@ -282,7 +288,8 @@ The original message interface remains available through xStarbound /exec:
     /exec return world.sendEntityMessage(player.id(),"xneeds_v0.set","hygiene",25):result()
     /exec return world.sendEntityMessage(player.id(),"xneeds_v0.reset"):result()
 
-The get result includes sleeping, caffeinated, bladderReliefRate, hygieneRecoveryRate,
+The get result includes sleeping, caffeinated, caffeineRemainingSeconds,
+caffeineRemaining, bladderReliefRate, hygieneRecoveryRate,
 hygieneEnvironment, lastHygieneEnvironment, pendingCombatDirtiness,
 sleepFastForward state, penaltyLevel, consequenceLevels, and
 consequenceMultipliers. The command output

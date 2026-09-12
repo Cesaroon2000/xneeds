@@ -17,6 +17,7 @@ local pendingRunningSeconds = 0
 local pendingJumpingSeconds = 0
 local lastHygieneEnvironment = {}
 local beverageFeedbackCooldown = 0
+local caffeineRemainingSeconds = 0
 local fastForwardButtonRect
 local hudBarRects = {}
 local sleepFastForward = {
@@ -57,6 +58,11 @@ end
 
 local function clampNeed(value)
   return math.max(0, math.min(100, value))
+end
+
+local function formatDuration(seconds)
+  seconds = math.max(0, math.floor(seconds + 0.5))
+  return string.format("%d:%02d", math.floor(seconds / 60), seconds % 60)
 end
 
 local function requireNumber(value, path)
@@ -1226,6 +1232,22 @@ local function caffeineActive()
   return ok and active == true
 end
 
+local function caffeineRemaining()
+  if not caffeineActive() then
+    caffeineRemainingSeconds = 0
+  end
+  return caffeineRemainingSeconds
+end
+
+local function onCaffeineUpdate(_, _, remaining)
+  -- The xneeds_caffeinated effect reports its own remaining duration here, so
+  -- the readout follows the real status effect instead of a second countdown.
+  if not isFiniteNumber(remaining) or remaining < 0 or remaining > 86400 then
+    return
+  end
+  caffeineRemainingSeconds = remaining
+end
+
 local function advanceNeeds(elapsed)
   normalizeStorage()
 
@@ -1492,6 +1514,7 @@ local function onConsumedItem(_, isLocal, itemName)
       caffeineDuration,
       entity.id()
     )
+    caffeineRemainingSeconds = math.max(caffeineRemainingSeconds, caffeineDuration)
   end
   queueBeverageFeedback(profileName, thirstRecovery)
   refreshWarningLevels(true)
@@ -1528,6 +1551,9 @@ local function debugGet(_, isLocal)
   result.ok = true
   result.sleeping = isSleeping()
   result.caffeinated = caffeineActive()
+  local caffeineTime = caffeineRemaining()
+  result.caffeineRemainingSeconds = caffeineTime
+  result.caffeineRemaining = formatDuration(caffeineTime)
   result.bladderReliefRate = bladderReliefRate()
   local hygieneState = hygieneEnvironment(needsConfig.updateInterval)
   result.hygieneRecoveryRate = hygieneState.recoveryRate
@@ -1628,7 +1654,9 @@ local function commandStatus()
     storage.needs.hygiene,
     100 - storage.needs.hygiene,
     tierLabel(consequences.levels.hygiene),
-    caffeineActive() and "yes" or "no",
+    caffeineActive()
+      and ("yes (" .. formatDuration(caffeineRemaining()) .. " remaining)")
+      or "no",
     sleepFastForward.mode,
     sleepFastForward.timeScaled and " (whole game)" or "",
     consequences.speed * 100,
@@ -1844,10 +1872,11 @@ local function needRecoveryState(needName, sleeping)
       return "Recovery: sleeping"
     end
     if caffeineActive() then
+      local remaining = formatDuration(caffeineRemaining())
       if needsConfig.beverages.caffeineAwakeGainMultiplier <= 0 then
-        return "Caffeine: awake fatigue paused"
+        return "Caffeine: fatigue paused (" .. remaining .. ")"
       end
-      return "Caffeine active"
+      return "Caffeine: " .. remaining .. " left"
     end
   elseif needName == "bladder" then
     if bladderReliefRate() > 0 then
@@ -2201,6 +2230,7 @@ function init()
   end
 
   message.setHandler("xneeds_v0.consume", onConsumedItem)
+  message.setHandler("xneeds_v0.caffeine", onCaffeineUpdate)
   message.setHandler("xneeds_v0.get", debugGet)
   message.setHandler("xneeds_v0.set", debugSet)
   message.setHandler("xneeds_v0.reset", debugReset)

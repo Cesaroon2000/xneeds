@@ -29,7 +29,8 @@ supported.
   load.
 - Water, juice, milk, soda, caffeine, alcohol, salty, toxic, and standard drink
   profiles.
-- Caffeine relief, alcohol fatigue, dehydration, and bladder effects.
+- Caffeine relief with remaining-time reporting, alcohol fatigue, dehydration,
+  and bladder effects.
 - Toilet relief and Hygiene recovery from baths, showers, clean liquids, and
   rain.
 - Hygiene loss from activity, combat, dirty liquids, and harsh environments.

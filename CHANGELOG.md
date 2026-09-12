@@ -12,6 +12,8 @@ Versioning while the mod remains in active development.
   active penalties for that need.
 - `hud.tooltips` configuration for enabling the tooltips, sizing, and tier
   colors. Disabled tooltips leave the existing meters unchanged.
+- Remaining caffeine time is reported by `/xneeds get` and shown in the Fatigue
+  hover tooltip.
 
 ### Changed
 
