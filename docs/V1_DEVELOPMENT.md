@@ -1,4 +1,4 @@
-# Needs V1.8.0 development notes
+# Needs V1.9.0 development notes
 
 ## Architecture and persistence
 
@@ -120,6 +120,30 @@ and healingliquid; hazardous and specialty liquids are excluded. Loungeable
 bath/tub objects also clean the player. Active vanilla showers and baths are
 recognized through their nearby dripping helper objects. A fixture may define
 needsHygieneRecoveryRate for explicit compatibility.
+
+## Food layer
+
+Eating is detected through the same generated notifier used for drinks.
+`register_drinks.lua` registers consumables whose merged category matches either
+`bladder.drinkCategory` (default drink) or `foods.category` (default food), plus
+any item opted in through a profile parameter or exact `itemProfiles` mapping.
+Each registered item gets one invisible one-shot effect that forwards its name
+to the player script.
+
+Resolution mirrors beverages with a separate `foods` section: item parameter,
+exact `foods.itemProfiles`, then ordered `foods.classificationRules`, then
+`foods.defaultProfile`. Food profiles carry the same four fields as drinks
+(thirstRecovery, bladderGain, fatigueChange, caffeineDuration) and are applied by
+the shared consumable path. The generic `needsThirstValue`, `needsBladderValue`,
+`needsFatigueChange`, and `needsCaffeineDuration` parameters therefore work for
+foods too, and a caffeinated food starts the same caffeine effect as a drink.
+
+The default food profiles are conservative: meal and snack increase Thirst
+slightly and add Bladder; juicy fruit restores Thirst; salty food increases it
+strongly; sugary food reduces Fatigue briefly; heavy food adds Fatigue; raw meat
+and toxic food are mild penalties. `/xneeds food <itemName>` and `/xneeds foods`
+mirror the beverage diagnostics and audit so fallbacks and misclassifications
+are easy to find and correct.
 
 ## Environmental Hygiene
 
@@ -300,6 +324,11 @@ The local xStarbound slash command is enabled by debug.commandsEnabled:
     /xneeds beverages all
     /xneeds beverages details
     /xneeds beverages alcohol
+    /xneeds food cookedmeat
+    /xneeds foods
+    /xneeds foods all
+    /xneeds foods details
+    /xneeds foods juicy
     /xneeds preset normal
     /xneeds preset noticeable
     /xneeds preset serious
@@ -313,20 +342,22 @@ to Thirst, Fatigue, Bladder, and Dirtiness. Values and additions are clamped to
 0 through 100. Commands are local to the current player and do not require
 safeScripts to be disabled.
 
-The `/xneeds beverages` audit enumerates the final loaded consumable assets with
-`root.assetsByExtension`, keeps the ones whose merged category is drink (or that
-opt in through the profile parameter or an exact item mapping), and resolves each
-through the same profile logic used at consumption time. With no argument it
-lists only items whose resolution source is the plain default, which are the
-candidates for a new `beverages.itemProfiles` exception. Passing `all`, a profile
-name, or a name fragment changes the listing; `details` additionally prints each
-fallback's asset path, source mod via `root.assetSource`, and the description and
-effect text used by classification. The result is cached per session, so later
-runs are instant. Known exceptions live in `beverages.itemProfiles`: Corvex
-Drink and Code Zerchesium resolve to soda, Beakeasy Moonshine to alcohol,
-Blood Chalice to standard, and Chewable Magnet plus the raw-meat foods whose
-mod category is `drink` (Jarred Fetus, Meat Smoothie, Orphan Paste) resolve to
-the `solid` profile so they give no hydration.
+The `/xneeds beverages` and `/xneeds foods` audits enumerate the final loaded
+consumable assets with `root.assetsByExtension`, keep the ones whose merged
+category is the relevant kind (or that opt in through the profile parameter or an
+exact item mapping), and resolve each through the same profile logic used at
+consumption time. With no argument they list only items whose resolution source
+is the plain default, which are the candidates for a new `itemProfiles`
+exception. Passing `all`, a profile name, or a name fragment changes the listing;
+`details` additionally prints each fallback's asset path, source mod via
+`root.assetSource`, and the description and effect text used by classification.
+The result is cached per session, so later runs are instant.
+
+Known drink exceptions live in `beverages.itemProfiles`: Corvex Drink and Code
+Zerchesium resolve to soda, Beakeasy Moonshine to alcohol, Blood Chalice to
+standard, and Chewable Magnet plus the raw-meat items whose mod category is
+`drink` (Jarred Fetus, Meat Smoothie, Orphan Paste) resolve to the `solid`
+profile so they give no hydration. Food exceptions go in `foods.itemProfiles`.
 
 The original message interface remains available through xStarbound /exec:
 
@@ -351,9 +382,10 @@ non-local messages.
 
 The player.config.patch adds /genericScriptContexts/xneeds_v0. A
 post-load preprocessor generates additive
-patches for final category-drink consumables after FU and Workshop content are
-loaded. It appends a notifier to their effect groups; it does not replace item
-files or existing effects. FU's deployment and status scripts are not edited.
+patches for final category-drink and category-food consumables after FU and
+Workshop content are loaded. It appends a notifier to their effect groups; it
+does not replace item files or existing effects. FU's deployment and status
+scripts are not edited.
 FrackinInterface and FU may continue to own teambar.config and its textures
 because Needs reads the effective geometry without patching it.
 
@@ -399,14 +431,17 @@ Recovery and environment:
    `thirstEnvironmentMultiplier` / `fatigueEnvironmentMultiplier` values and the
    matching hover tooltip lines.
 
-Beverages and HUD:
+Beverages, food, and HUD:
 
-1. Run `/xneeds beverages` and confirm it reports `default fallbacks (0)`.
+1. Run `/xneeds beverages` and `/xneeds foods` and confirm each reports
+   `default fallbacks (0)`.
 2. Spot-check water, coffee, soda, alcohol, salty, and toxic examples with
    `/xneeds beverage <itemName>`.
-3. Hover each need meter and confirm name, value, tier, recovery, and penalty
+3. Eat a plain meal, a juicy fruit, a salty food, and a sugary food and confirm
+   the expected Thirst/Bladder/Fatigue changes with `/xneeds food <itemName>`.
+4. Hover each need meter and confirm name, value, tier, recovery, and penalty
    rows are correct and do not overlap the status row.
-4. Change interface scale and window size and confirm the meters and tooltips
+5. Change interface scale and window size and confirm the meters and tooltips
    stay aligned.
 
 Safe removal:

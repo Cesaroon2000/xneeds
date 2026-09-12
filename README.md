@@ -4,7 +4,7 @@ Needs is an xStarbound survival-simulation mod that adds Thirst, Fatigue,
 Bladder, and Hygiene to the player without replacing the vanilla or Frackin'
 Universe HUD.
 
-Current version: **1.8.0**
+Current version: **1.9.0**
 
 ![Needs HUD preview](_previewimage.png)
 
@@ -27,10 +27,12 @@ supported.
   recovery state, and active penalties. Hidden until hovered, with no permanent
   labels.
 - Configurable thresholds, warnings, and nonlethal gameplay consequences.
-- Automatic detection of vanilla, FU, and Workshop beverages after all assets
-  load.
-- Water, juice, milk, soda, caffeine, alcohol, salty, toxic, standard, and
-  solid-food profiles, with exact mappings for misclassified FU items.
+- Automatic detection of vanilla, FU, and Workshop drinks and foods after all
+  assets load.
+- Drink profiles (water, juice, milk, soda, caffeine, alcohol, salty, toxic,
+  standard, solid-food) and food profiles (meal, heavy, snack, sugary, juicy,
+  salty, raw-meat, toxic, caffeinated), with exact mappings for misclassified
+  FU items.
 - Caffeine relief with remaining-time reporting, alcohol fatigue, dehydration,
   and bladder effects.
 - Configurable container returns, such as getting an Empty Bottle back after
@@ -67,8 +69,9 @@ All gameplay and presentation tuning is centralized in
 
 Important sections include:
 
-- `beverages`: profiles, classification rules, FU exceptions, caffeine,
-  feedback, and container returns.
+- `beverages` and `foods`: profiles, classification rules, FU exceptions,
+  feedback, and container returns. Food affects Thirst, Bladder, and Fatigue
+  when eaten.
 - `thresholds`, `consequences`, and `warnings`: severity and penalties.
 - `hygiene.environment` and `hygiene.combat`: environmental Dirtiness.
 - `sleep.bedEffects` and `fatigue.sleepRecoveryPerSecond`: sleep detection and
@@ -112,19 +115,26 @@ xStarbound safe scripts.
 /xneeds beverages all
 /xneeds beverages details
 /xneeds beverages <profile>
+/xneeds food <itemName>
+/xneeds foods
+/xneeds foods all
+/xneeds foods details
+/xneeds foods <profile>
 /xneeds reset
 ```
 
-The beverage command reports the selected profile, classification source,
-signed Needs changes, caffeine duration, and any item-specific overrides.
+The beverage and food commands report the selected profile, classification
+source, signed Needs changes, caffeine duration, and any item-specific
+overrides.
 
-The beverages audit lists every detected drink with its resolved profile and
-source. With no argument it lists only the items that fall back to the default
-profile, which are the best candidates for an exact `beverages.itemProfiles`
-exception. Pass `all`, a profile name, or a name fragment to change the listing.
-`details` adds each fallback's asset path, source mod, and the description and
-effect text the classifier sees, which makes it easy to identify unfamiliar
-items or patched asset sources.
+The beverages and foods audits list every detected item with its resolved
+profile and source. With no argument they list only the items that fall back to
+the default profile, which are the best candidates for an exact
+`beverages.itemProfiles` or `foods.itemProfiles` exception. Pass `all`, a
+profile name, or a name fragment to change the listing. `details` adds each
+fallback's asset path, source mod, and the description and effect text the
+classifier sees, which makes it easy to identify unfamiliar items or patched
+asset sources.
 
 ## Sleeping
 

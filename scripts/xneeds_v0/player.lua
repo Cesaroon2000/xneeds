@@ -133,6 +133,67 @@ local function requireColor(value, path)
   end
 end
 
+local function requireConsumableProfiles(section, path)
+  if type(section.defaultProfile) ~= "string"
+      or section.defaultProfile == ""
+      or type(section.profiles) ~= "table"
+      or type(section.itemProfiles) ~= "table"
+      or type(section.classificationRules) ~= "table" then
+    error(string.format("[xneeds_v0] %s configuration is invalid", path))
+  end
+
+  for profileName, profile in pairs(section.profiles) do
+    local profilePath = path .. ".profiles." .. tostring(profileName)
+    if type(profileName) ~= "string" or profileName == ""
+        or type(profile) ~= "table" then
+      error(string.format("[xneeds_v0] %s profile names and values must be valid", path))
+    end
+    requireNumber(profile.thirstRecovery, profilePath .. ".thirstRecovery")
+    requireNumber(profile.bladderGain, profilePath .. ".bladderGain")
+    requireNumber(profile.fatigueChange, profilePath .. ".fatigueChange")
+    requireNonnegativeNumber(profile.caffeineDuration, profilePath .. ".caffeineDuration")
+  end
+  if type(section.profiles[section.defaultProfile]) ~= "table" then
+    error(string.format("[xneeds_v0] %s.defaultProfile does not name a profile", path))
+  end
+
+  for itemName, profileName in pairs(section.itemProfiles) do
+    if type(itemName) ~= "string" or itemName == ""
+        or type(profileName) ~= "string"
+        or type(section.profiles[profileName]) ~= "table" then
+      error(string.format("[xneeds_v0] %s.itemProfiles contains an invalid mapping", path))
+    end
+  end
+  for index, rule in ipairs(section.classificationRules) do
+    local rulePath = string.format("%s.classificationRules[%s]", path, index)
+    if type(rule) ~= "table"
+        or type(rule.profile) ~= "string"
+        or type(section.profiles[rule.profile]) ~= "table" then
+      error("[xneeds_v0] " .. rulePath .. " has an invalid profile")
+    end
+    requireStringList(rule.patterns, rulePath .. ".patterns")
+  end
+end
+
+local function requireConsumableFeedback(section, path)
+  local feedback = section.feedback
+  if type(feedback) ~= "table"
+      or type(feedback.enabled) ~= "boolean"
+      or type(feedback.profileMessages) ~= "table"
+      or type(feedback.dehydratingMessage) ~= "string"
+      or feedback.dehydratingMessage == "" then
+    error(string.format("[xneeds_v0] %s.feedback configuration is invalid", path))
+  end
+  requireNonnegativeNumber(feedback.cooldownSeconds, path .. ".feedback.cooldownSeconds")
+  for profileName, messageText in pairs(feedback.profileMessages) do
+    if type(section.profiles[profileName]) ~= "table"
+        or type(messageText) ~= "string"
+        or messageText == "" then
+      error(string.format("[xneeds_v0] %s.feedback.profileMessages contains an invalid entry", path))
+    end
+  end
+end
+
 local function loadConfig()
   local config = root.assetJson("/xneeds_v0.config")
   local requiredSections = {
@@ -141,6 +202,7 @@ local function loadConfig()
     "fatigue",
     "bladder",
     "beverages",
+    "foods",
     "hygiene",
     "sleep",
     "thresholds",
@@ -285,6 +347,8 @@ local function loadConfig()
     {config.beverages.fatigueChangeParameter, "beverages.fatigueChangeParameter"},
     {config.beverages.caffeineDurationParameter, "beverages.caffeineDurationParameter"},
     {config.beverages.caffeineEffect, "beverages.caffeineEffect"},
+    {config.foods.category, "foods.category"},
+    {config.foods.profileParameter, "foods.profileParameter"},
     {config.hygiene.fixtureOverrideParameter, "hygiene.fixtureOverrideParameter"}
   }
   for _, setting in ipairs(stringSettings) do
@@ -299,13 +363,7 @@ local function loadConfig()
   end
 
   local beverages = config.beverages
-  if type(beverages.defaultProfile) ~= "string"
-      or beverages.defaultProfile == ""
-      or type(beverages.profiles) ~= "table"
-      or type(beverages.itemProfiles) ~= "table"
-      or type(beverages.classificationRules) ~= "table" then
-    error("[xneeds_v0] beverages configuration is invalid")
-  end
+  requireConsumableProfiles(beverages, "beverages")
   requireNumber(
     beverages.caffeineAwakeGainMultiplier,
     "beverages.caffeineAwakeGainMultiplier"
@@ -314,57 +372,7 @@ local function loadConfig()
       or beverages.caffeineAwakeGainMultiplier > 1 then
     error("[xneeds_v0] beverages.caffeineAwakeGainMultiplier must be between 0 and 1")
   end
-
-  for profileName, profile in pairs(beverages.profiles) do
-    local path = "beverages.profiles." .. tostring(profileName)
-    if type(profileName) ~= "string" or profileName == ""
-        or type(profile) ~= "table" then
-      error("[xneeds_v0] beverage profile names and values must be valid")
-    end
-    requireNumber(profile.thirstRecovery, path .. ".thirstRecovery")
-    requireNumber(profile.bladderGain, path .. ".bladderGain")
-    requireNumber(profile.fatigueChange, path .. ".fatigueChange")
-    requireNonnegativeNumber(profile.caffeineDuration, path .. ".caffeineDuration")
-  end
-  if type(beverages.profiles[beverages.defaultProfile]) ~= "table" then
-    error("[xneeds_v0] beverages.defaultProfile does not name a profile")
-  end
-
-  for itemName, profileName in pairs(beverages.itemProfiles) do
-    if type(itemName) ~= "string" or itemName == ""
-        or type(profileName) ~= "string"
-        or type(beverages.profiles[profileName]) ~= "table" then
-      error("[xneeds_v0] beverages.itemProfiles contains an invalid mapping")
-    end
-  end
-  for index, rule in ipairs(beverages.classificationRules) do
-    local path = string.format("beverages.classificationRules[%s]", index)
-    if type(rule) ~= "table"
-        or type(rule.profile) ~= "string"
-        or type(beverages.profiles[rule.profile]) ~= "table" then
-      error("[xneeds_v0] " .. path .. " has an invalid profile")
-    end
-    requireStringList(rule.patterns, path .. ".patterns")
-  end
-  local feedback = beverages.feedback
-  if type(feedback) ~= "table"
-      or type(feedback.enabled) ~= "boolean"
-      or type(feedback.profileMessages) ~= "table"
-      or type(feedback.dehydratingMessage) ~= "string"
-      or feedback.dehydratingMessage == "" then
-    error("[xneeds_v0] beverages.feedback configuration is invalid")
-  end
-  requireNonnegativeNumber(
-    feedback.cooldownSeconds,
-    "beverages.feedback.cooldownSeconds"
-  )
-  for profileName, messageText in pairs(feedback.profileMessages) do
-    if type(beverages.profiles[profileName]) ~= "table"
-        or type(messageText) ~= "string"
-        or messageText == "" then
-      error("[xneeds_v0] beverages.feedback.profileMessages contains an invalid entry")
-    end
-  end
+  requireConsumableFeedback(beverages, "beverages")
 
   local returnItems = beverages.returnItems
   if type(returnItems) ~= "table" or type(returnItems.enabled) ~= "boolean"
@@ -377,6 +385,13 @@ local function loadConfig()
       error("[xneeds_v0] beverages.returnItems contains an invalid mapping")
     end
   end
+
+  local foods = config.foods
+  if type(foods.enabled) ~= "boolean" then
+    error("[xneeds_v0] foods.enabled must be a boolean")
+  end
+  requireConsumableProfiles(foods, "foods")
+  requireConsumableFeedback(foods, "foods")
 
   requireStringList(config.bladder.reliefObjectNamePatterns, "bladder.reliefObjectNamePatterns")
   requireStringList(config.hygiene.cleanLiquidNames, "hygiene.cleanLiquidNames")
@@ -520,6 +535,7 @@ local function loadConfig()
   end
 
   config.bladder.drinkCategory = string.lower(config.bladder.drinkCategory)
+  config.foods.category = string.lower(config.foods.category)
   return config
 end
 
@@ -1331,7 +1347,7 @@ local function appendBeverageEffectNames(parts, effects)
   end
 end
 
-local function beverageSearchText(itemName, details)
+local function consumableSearchText(itemName, details)
   local parts = {itemName}
   local textFields = {"shortdescription", "description"}
   for _, field in ipairs(textFields) do
@@ -1347,40 +1363,47 @@ local function beverageSearchText(itemName, details)
   return " " .. string.lower(table.concat(parts, " ")) .. " "
 end
 
-local function beverageProfile(itemName, details)
-  local beverages = needsConfig.beverages
-  local explicit = details.parameters[beverages.profileParameter]
+local function profileFor(section, itemName, details)
+  local explicit = details.parameters[section.profileParameter]
   if explicit == nil then
-    explicit = details.config[beverages.profileParameter]
+    explicit = details.config[section.profileParameter]
   end
 
   if explicit == false then
-    return beverages.defaultProfile,
-      beverages.profiles[beverages.defaultProfile],
+    return section.defaultProfile,
+      section.profiles[section.defaultProfile],
       "default forced by item parameter"
-  elseif type(explicit) == "string" and beverages.profiles[explicit] then
-    return explicit, beverages.profiles[explicit], "item parameter"
+  elseif type(explicit) == "string" and section.profiles[explicit] then
+    return explicit, section.profiles[explicit], "item parameter"
   end
 
-  local mapped = beverages.itemProfiles[string.lower(itemName)]
-  if mapped and beverages.profiles[mapped] then
-    return mapped, beverages.profiles[mapped], "exact item mapping"
+  local mapped = section.itemProfiles[string.lower(itemName)]
+  if mapped and section.profiles[mapped] then
+    return mapped, section.profiles[mapped], "exact item mapping"
   end
 
-  local searchText = beverageSearchText(itemName, details)
-  for _, rule in ipairs(beverages.classificationRules) do
+  local searchText = consumableSearchText(itemName, details)
+  for _, rule in ipairs(section.classificationRules) do
     for _, pattern in ipairs(rule.patterns) do
       if string.find(searchText, string.lower(pattern), 1, true) then
         return rule.profile,
-          beverages.profiles[rule.profile],
+          section.profiles[rule.profile],
           "classification rule: " .. pattern
       end
     end
   end
 
-  return beverages.defaultProfile,
-    beverages.profiles[beverages.defaultProfile],
+  return section.defaultProfile,
+    section.profiles[section.defaultProfile],
     "default"
+end
+
+local function beverageProfile(itemName, details)
+  return profileFor(needsConfig.beverages, itemName, details)
+end
+
+local function foodProfile(itemName, details)
+  return profileFor(needsConfig.foods, itemName, details)
 end
 
 local function configuredBeverageValue(details, parameterName, defaultValue)
@@ -1396,8 +1419,7 @@ local function configuredBeverageValue(details, parameterName, defaultValue)
   return defaultValue, "resolved profile"
 end
 
-local function queueBeverageFeedback(profileName, thirstRecovery)
-  local feedback = needsConfig.beverages.feedback
+local function queueConsumableFeedback(feedback, profileName, thirstRecovery)
   if not feedback.enabled or beverageFeedbackCooldown > 0 then
     return
   end
@@ -1429,8 +1451,44 @@ local function grantConsumedReturn(itemName)
   end
 end
 
+local function consumableKind(itemName, details)
+  local lowerName = string.lower(itemName)
+  local beverages = needsConfig.beverages
+  local foods = needsConfig.foods
+
+  local explicitBeverage = details.parameters[beverages.profileParameter]
+  if explicitBeverage == nil then
+    explicitBeverage = details.config[beverages.profileParameter]
+  end
+  if explicitBeverage ~= nil or beverages.itemProfiles[lowerName] ~= nil then
+    return "drink"
+  end
+
+  if foods.enabled then
+    local explicitFood = details.parameters[foods.profileParameter]
+    if explicitFood == nil then
+      explicitFood = details.config[foods.profileParameter]
+    end
+    if explicitFood ~= nil or foods.itemProfiles[lowerName] ~= nil then
+      return "food"
+    end
+  end
+
+  local category = details.config.category
+  if type(category) ~= "string" then
+    category = details.parameters.category
+  end
+  category = type(category) == "string" and string.lower(category) or ""
+  if category == needsConfig.bladder.drinkCategory then
+    return "drink"
+  end
+  if foods.enabled and category == foods.category then
+    return "food"
+  end
+end
+
 local function onConsumedItem(_, isLocal, itemName)
-  -- The generated one-shot drink effect forwards the consumed item name here.
+  -- The generated one-shot consumable effect forwards the consumed item here.
   if not isLocal then
     return
   end
@@ -1440,9 +1498,21 @@ local function onConsumedItem(_, isLocal, itemName)
     return
   end
 
+  local kind = consumableKind(itemName, details)
+  if not kind then
+    return
+  end
+
   grantConsumedReturn(itemName)
 
-  local profileName, profile = beverageProfile(itemName, details)
+  local profileName, profile, feedback
+  if kind == "drink" then
+    profileName, profile = beverageProfile(itemName, details)
+    feedback = needsConfig.beverages.feedback
+  else
+    profileName, profile = foodProfile(itemName, details)
+    feedback = needsConfig.foods.feedback
+  end
 
   local bladderGain = configuredItemValue(
     itemName,
@@ -1493,13 +1563,14 @@ local function onConsumedItem(_, isLocal, itemName)
     )
     caffeineRemainingSeconds = math.max(caffeineRemainingSeconds, caffeineDuration)
   end
-  queueBeverageFeedback(profileName, thirstRecovery)
+  queueConsumableFeedback(feedback, profileName, thirstRecovery)
   refreshWarningLevels(true)
 
   if needsConfig.debug.logDrinkEvents then
     sb.logInfo(
-      "[xneeds_v0] drink event: %s profile %s, bladder %+g, thirst recovery %+g, fatigue %+g, caffeine %gs",
+      "[xneeds_v0] consume event: %s (%s) profile %s, bladder %+g, thirst recovery %+g, fatigue %+g, caffeine %gs",
       itemName,
+      kind,
       profileName,
       bladderGain or 0,
       thirstRecovery or 0,
@@ -1613,7 +1684,7 @@ local function commandStatus()
   local consequences = currentConsequences()
   local hygieneState = hygieneEnvironment(needsConfig.updateInterval)
   return string.format(
-    "^#f3d36a;<Needs V1.8>^reset;\n"
+    "^#f3d36a;<Needs V1.9>^reset;\n"
       .. "Thirst: ^cyan;%.1f^reset; [%s]\n"
       .. "Fatigue: ^cyan;%.1f^reset; [%s]\n"
       .. "Bladder: ^cyan;%.1f^reset; [%s]\n"
@@ -1666,6 +1737,8 @@ local function commandHelp(errorText)
     .. "^cyan;/xneeds add <need> <amount>^reset;\n"
     .. "^cyan;/xneeds beverage <itemName>^reset;\n"
     .. "^cyan;/xneeds beverages [all|details|<profile>|<text>]^reset;\n"
+    .. "^cyan;/xneeds food <itemName>^reset;\n"
+    .. "^cyan;/xneeds foods [all|details|<profile>|<text>]^reset;\n"
     .. "^cyan;/xneeds preset <normal|noticeable|serious|urgent|critical>^reset;\n"
     .. "^cyan;/xneeds reset^reset;"
 end
@@ -1718,30 +1791,39 @@ local function beverageDiagnosticLine(label, value, source, invert)
   return string.format("%s: %+g [%s]", label, value, source or "unknown")
 end
 
-local drinkAuditCache
+local consumableAuditCache = {}
 
-local function detectedDrinkItems()
-  if drinkAuditCache then
-    return drinkAuditCache
+local function auditConfig(kind)
+  if kind == "food" then
+    return needsConfig.foods, needsConfig.foods.category,
+      needsConfig.foods.profileParameter, "Food"
+  end
+  return needsConfig.beverages, needsConfig.bladder.drinkCategory,
+    needsConfig.beverages.profileParameter, "Beverage"
+end
+
+local function detectedConsumableItems(kind)
+  if consumableAuditCache[kind] then
+    return consumableAuditCache[kind]
   end
 
+  local section, category, profileParameter = auditConfig(kind)
   local items = {}
   local seen = {}
-  local beverages = needsConfig.beverages
   local ok, assetPaths = pcall(root.assetsByExtension, "consumable")
   if ok and type(assetPaths) == "table" then
     for _, assetPath in ipairs(assetPaths) do
       local assetOk, item = pcall(root.assetJson, assetPath)
       if assetOk and type(item) == "table" then
         local itemName = type(item.itemName) == "string" and item.itemName or ""
-        local category = type(item.category) == "string"
+        local itemCategory = type(item.category) == "string"
           and string.lower(item.category) or ""
-        local explicitProfile = item[beverages.profileParameter]
-        local explicitlyConfigured = beverages.itemProfiles[string.lower(itemName)] ~= nil
+        local explicitProfile = item[profileParameter]
+        local explicitlyConfigured = section.itemProfiles[string.lower(itemName)] ~= nil
           or type(explicitProfile) == "string"
           or explicitProfile == false
         if itemName ~= "" and not seen[itemName]
-            and (category == "drink" or explicitlyConfigured) then
+            and (itemCategory == category or explicitlyConfigured) then
           seen[itemName] = true
           table.insert(items, {
             name = itemName,
@@ -1755,11 +1837,11 @@ local function detectedDrinkItems()
   table.sort(items, function(a, b)
     return a.name < b.name
   end)
-  drinkAuditCache = items
+  consumableAuditCache[kind] = items
   return items
 end
 
-local function beverageAuditText(details)
+local function consumableAuditText(details)
   local parts = {}
   local function addText(value)
     if type(value) == "string" and value ~= "" then
@@ -1787,18 +1869,28 @@ local function beverageAuditText(details)
   return text
 end
 
-local function beverageAudit(arguments)
-  local items = detectedDrinkItems()
+local function consumableAudit(kind, arguments)
+  local section, _, _, label = auditConfig(kind)
+  local items = detectedConsumableItems(kind)
   if #items == 0 then
-    return "Beverage audit: no detected drinks."
+    return label .. " audit: no detected items."
   end
 
-  local showDetails = arguments[2] == "details"
-  local filter = showDetails and nil or arguments[2]
+  local showDetails = false
+  local filter
+  for index = 2, #arguments do
+    local argument = arguments[index]
+    if argument == "details" then
+      showDetails = true
+    elseif filter == nil then
+      filter = argument
+    end
+  end
+
   local profileFilter
   local nameFilter
   if filter and filter ~= "all" then
-    if needsConfig.beverages.profiles[filter] then
+    if section.profiles[filter] then
       profileFilter = filter
     else
       nameFilter = filter
@@ -1811,7 +1903,7 @@ local function beverageAudit(arguments)
     local itemName = record.name
     local details = itemDetails(itemName)
     if details then
-      local profileName, _, source = beverageProfile(itemName, details)
+      local profileName, _, source = profileFor(section, itemName, details)
       counts[profileName] = (counts[profileName] or 0) + 1
 
       local include
@@ -1836,7 +1928,7 @@ local function beverageAudit(arguments)
             entry,
             record.path,
             sourceOk and sourcePath or "unknown",
-            beverageAuditText(details)
+            consumableAuditText(details)
           )
         end
         table.insert(matches, entry)
@@ -1874,12 +1966,59 @@ local function beverageAudit(arguments)
   end
 
   return string.format(
-    "Beverage audit: %d detected. Profiles: %s\n%s (%d):\n%s",
+    "%s audit: %d detected. Profiles: %s\n%s (%d):\n%s",
+    label,
     #items,
     table.concat(profileSummary, ", "),
     scope,
     #matches,
     table.concat(lines, "\n")
+  )
+end
+
+local function beverageAudit(arguments)
+  return consumableAudit("drink", arguments)
+end
+
+local function foodAudit(arguments)
+  return consumableAudit("food", arguments)
+end
+
+local function consumableDiagnostic(label, itemName, profileName, profile, profileSource)
+  local details = itemDetails(itemName)
+  local bladderGain, bladderSource = configuredItemValue(
+    itemName,
+    details,
+    needsConfig.bladder.overrideParameter,
+    needsConfig.bladder.itemOverrides,
+    profile.bladderGain
+  )
+  local thirstRecovery, thirstSource = configuredItemValue(
+    itemName,
+    details,
+    needsConfig.thirst.overrideParameter,
+    needsConfig.thirst.itemOverrides,
+    profile.thirstRecovery
+  )
+  local fatigueChange, fatigueSource = configuredBeverageValue(
+    details,
+    needsConfig.beverages.fatigueChangeParameter,
+    profile.fatigueChange
+  )
+  local caffeineDuration, caffeineSource = configuredBeverageValue(
+    details,
+    needsConfig.beverages.caffeineDurationParameter,
+    profile.caffeineDuration
+  )
+  return string.format("%s %s\nProfile: %s [%s]\n%s\n%s\n%s\n%s",
+    label,
+    itemName,
+    profileName,
+    profileSource,
+    beverageDiagnosticLine("Thirst", thirstRecovery, thirstSource, true),
+    beverageDiagnosticLine("Bladder", bladderGain, bladderSource, false),
+    beverageDiagnosticLine("Fatigue", fatigueChange, fatigueSource, false),
+    beverageDiagnosticLine("Caffeine seconds", caffeineDuration, caffeineSource, false)
   )
 end
 
@@ -1899,41 +2038,19 @@ local function needsCommand(rawArguments)
       return commandHelp("Unknown beverage item.")
     end
     local profileName, profile, profileSource = beverageProfile(itemName, details)
-    local bladderGain, bladderSource = configuredItemValue(
-      itemName,
-      details,
-      needsConfig.bladder.overrideParameter,
-      needsConfig.bladder.itemOverrides,
-      profile.bladderGain
-    )
-    local thirstRecovery, thirstSource = configuredItemValue(
-      itemName,
-      details,
-      needsConfig.thirst.overrideParameter,
-      needsConfig.thirst.itemOverrides,
-      profile.thirstRecovery
-    )
-    local fatigueChange, fatigueSource = configuredBeverageValue(
-      details,
-      needsConfig.beverages.fatigueChangeParameter,
-      profile.fatigueChange
-    )
-    local caffeineDuration, caffeineSource = configuredBeverageValue(
-      details,
-      needsConfig.beverages.caffeineDurationParameter,
-      profile.caffeineDuration
-    )
-    return string.format("Beverage %s\nProfile: %s [%s]\n%s\n%s\n%s\n%s",
-      itemName,
-      profileName,
-      profileSource,
-      beverageDiagnosticLine("Thirst", thirstRecovery, thirstSource, true),
-      beverageDiagnosticLine("Bladder", bladderGain, bladderSource, false),
-      beverageDiagnosticLine("Fatigue", fatigueChange, fatigueSource, false),
-      beverageDiagnosticLine("Caffeine seconds", caffeineDuration, caffeineSource, false)
-    )
+    return consumableDiagnostic("Beverage", itemName, profileName, profile, profileSource)
+  elseif operation == "food" then
+    local itemName = arguments[2]
+    local details = itemDetails(itemName)
+    if not details then
+      return commandHelp("Unknown food item.")
+    end
+    local profileName, profile, profileSource = foodProfile(itemName, details)
+    return consumableDiagnostic("Food", itemName, profileName, profile, profileSource)
   elseif operation == "beverages" then
     return beverageAudit(arguments)
+  elseif operation == "foods" then
+    return foodAudit(arguments)
   elseif operation == "help" then
     return commandHelp()
   elseif operation == "reset" then

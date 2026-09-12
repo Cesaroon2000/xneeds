@@ -1,6 +1,6 @@
 {
   "author" : "Cesaroon2000",
-  "description" : "Persistent Thirst, Fatigue, Bladder, and Hygiene needs with recovery interactions, penalties, warnings, an adaptive HUD with optional hover details, fast restful sleep, day/night fatigue, and environment-driven thirst and fatigue.",
+  "description" : "Persistent Thirst, Fatigue, Bladder, and Hygiene needs with drink and food profiles, recovery interactions, penalties, warnings, an adaptive HUD with optional hover details, fast restful sleep, day/night fatigue, and environment-driven thirst and fatigue.",
   "friendlyName" : "xNeeds",
   "name" : "xneeds",
   "requires" : ["xSBassets"],
@@ -8,5 +8,5 @@
     "postLoad" : ["/scripts/xneeds_v0/register_drinks.lua"]
   },
   "tags" : "Mechanics",
-  "version" : "1.8.0"
+  "version" : "1.9.0"
 }

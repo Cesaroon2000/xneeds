@@ -1,5 +1,5 @@
 -- Runs after every asset source (including Workshop mods) has loaded.  Each
--- final consumable categorised as a drink receives a unique, invisible,
+-- final consumable categorised as a drink or food receives a unique, invisible,
 -- one-shot effect which reports the consumed item to the Needs player script.
 -- Existing item assets and effect groups are extended, never replaced.
 
@@ -7,7 +7,7 @@ local function safeName(value)
   return string.gsub(string.lower(value), "[^a-z0-9_]", "_")
 end
 
-local function drinkPatch(effectName, effects)
+local function consumablePatch(effectName, effects)
   local descriptor = {
     effect = effectName,
     duration = 0.1
@@ -38,29 +38,51 @@ local function drinkPatch(effectName, effects)
 end
 
 local needsConfig = assets.json("/xneeds_v0.config")
-local beverageConfig = type(needsConfig.beverages) == "table"
-  and needsConfig.beverages
-  or {}
-local itemProfiles = type(beverageConfig.itemProfiles) == "table"
-  and beverageConfig.itemProfiles
-  or {}
-local profileParameter = type(beverageConfig.profileParameter) == "string"
-  and beverageConfig.profileParameter
+local beverages = type(needsConfig.beverages) == "table" and needsConfig.beverages or {}
+local foods = type(needsConfig.foods) == "table" and needsConfig.foods or {}
+
+local bladder = type(needsConfig.bladder) == "table" and needsConfig.bladder or {}
+local drinkCategory = type(bladder.drinkCategory) == "string"
+  and string.lower(bladder.drinkCategory)
+  or "drink"
+local beverageProfiles = type(beverages.itemProfiles) == "table" and beverages.itemProfiles or {}
+local beverageParameter = type(beverages.profileParameter) == "string"
+  and beverages.profileParameter
   or "needsBeverageProfile"
+
+local foodsEnabled = foods.enabled == true
+local foodCategory = type(foods.category) == "string"
+  and string.lower(foods.category)
+  or "food"
+local foodProfiles = type(foods.itemProfiles) == "table" and foods.itemProfiles or {}
+local foodParameter = type(foods.profileParameter) == "string"
+  and foods.profileParameter
+  or "needsFoodProfile"
 
 for index, assetPath in ipairs(assets.byExtension("consumable")) do
   local item = assets.json(assetPath)
   local category = type(item.category) == "string" and string.lower(item.category) or ""
   local itemName = type(item.itemName) == "string" and item.itemName or ""
-  local explicitProfile = item[profileParameter]
-  local explicitlyConfigured = itemProfiles[string.lower(itemName)] ~= nil
-    or type(explicitProfile) == "string"
-    or explicitProfile == false
+  local lowerName = string.lower(itemName)
 
-  if itemName ~= "" and (category == "drink" or explicitlyConfigured) then
+  local explicitBeverage = item[beverageParameter]
+  local isDrink = category == drinkCategory
+    or type(explicitBeverage) == "string"
+    or explicitBeverage == false
+    or beverageProfiles[lowerName] ~= nil
+
+  local explicitFood = item[foodParameter]
+  local isFood = foodsEnabled and (
+    category == foodCategory
+      or type(explicitFood) == "string"
+      or explicitFood == false
+      or foodProfiles[lowerName] ~= nil
+  )
+
+  if itemName ~= "" and (isDrink or isFood) then
     local suffix = string.format("%s_%s", safeName(itemName), index)
     local effectName = "xneedsdrink_" .. suffix
-    local generatedRoot = "/xneeds_v0/generated/drinks/" .. suffix
+    local generatedRoot = "/xneeds_v0/generated/consumables/" .. suffix
     local effectPath = generatedRoot .. ".statuseffect"
     local patchPath = generatedRoot .. ".patch"
 
@@ -72,7 +94,7 @@ for index, assetPath in ipairs(assets.byExtension("consumable")) do
         itemName = itemName
       }
     })
-    assets.add(patchPath, drinkPatch(effectName, item.effects))
+    assets.add(patchPath, consumablePatch(effectName, item.effects))
     assets.patch(assetPath, patchPath)
   end
 end

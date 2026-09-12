@@ -3,6 +3,25 @@
 All notable changes to Needs are documented here. Versions follow Semantic
 Versioning while the mod remains in active development.
 
+## [1.9.0] - 2026-09-11
+
+### Added
+
+- Food layer. Consumables in the `food` category now receive the one-shot
+  notifier and resolve a food profile (`meal`, `heavy`, `snack`, `sugary`,
+  `juicy`, `salty`, `rawmeat`, `toxic`, `caffeinated`), affecting Thirst,
+  Bladder, and Fatigue on eat. Foods use the shared thirst/bladder/fatigue
+  override parameters and can grant caffeine like drinks.
+- `foods` configuration section with profiles, classification rules, exact
+  `itemProfiles`, feedback messages, and an `enabled` toggle.
+- `/xneeds food <itemName>` diagnostic and `/xneeds foods` audit with the same
+  `all`, `details`, profile, and name-fragment filters as the beverage audit.
+
+### Changed
+
+- Shared consumable profile resolution, feedback, validation, and audit code so
+  drinks and foods use one path. `register_drinks.lua` now registers both.
+
 ## [1.8.0] - 2026-09-11
 
 ### Added
