@@ -4,7 +4,7 @@ Needs is an xStarbound survival-simulation mod that adds Thirst, Fatigue,
 Bladder, and Hygiene to the player without replacing the vanilla or Frackin'
 Universe HUD.
 
-Current version: **1.11.0**
+Current version: **1.12.0**
 
 ![Needs HUD preview](_previewimage.png)
 
@@ -44,9 +44,11 @@ supported.
   qualifying sleep grants a temporary Rested bonus.
 - Day/night Fatigue: staying awake at night adds Fatigue faster.
 - Environment-driven Thirst and Fatigue from hot, cold, toxic, and other biomes.
-- In-game settings overlay for user-configurable HUD options: meters on/off,
-  hover tooltips, compact bars, always-show values, threshold pulse, and
-  per-need bar visibility.
+- In-game settings overlay (`/xneeds options`) for user-configurable options:
+  HUD meters, hover tooltips, compact bars, always-show values, threshold pulse,
+  per-need bar visibility, gameplay toggles (warnings, consequences, feedback,
+  day/night fatigue, rested bonus, environment effects), and a difficulty
+  selector (Casual, Realistic, Hardcore).
 - Local testing and beverage-diagnostic commands.
 
 ## Installation
@@ -99,10 +101,13 @@ styling, and add no permanent labels or separate panel. Set
 ### In-game settings
 
 Run `/xneeds options` to open a settings panel drawn over the HUD. It exposes
-HUD meters on/off, hover tooltips, compact bars, always-show values, threshold
-pulse, and per-need bar visibility. Choices are saved per character and applied
-immediately; use the Close button or `/xneeds options` again to close it. The
-config file supplies the defaults for a new character.
+HUD options (meters on/off, hover tooltips, compact bars, always-show values,
+threshold pulse, per-need bar visibility) and gameplay options (warnings,
+consequences, feedback, day/night fatigue, rested bonus, environment effects),
+plus a difficulty selector that scales passive gains and decay (Casual,
+Realistic, Hardcore). Choices are saved per character and applied immediately;
+use the Close button or `/xneeds options` again to close it. The config file
+supplies the defaults for a new character.
 
 ## Testing commands
 

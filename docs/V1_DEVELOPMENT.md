@@ -1,4 +1,4 @@
-# Needs V1.11.0 development notes
+# Needs V1.12.0 development notes
 
 ## Architecture and persistence
 
@@ -308,15 +308,29 @@ clean liquid, bath/tub, shower/bath, or rain is actively cleaning the player.
 ## In-game settings
 
 `/xneeds options` toggles a settings panel drawn on the same full-window canvas
-as the meters, so no interface file is replaced. The panel lists toggles for HUD
-meters, hover tooltips, compact bars, always-show values, threshold pulse, and
-each of the four need bars, plus a Close button.
+as the meters, so no interface file is replaced. The panel has two sections plus
+a Close button:
 
-Settings live in `storage.xneedsSettings` and are normalized on read, so missing
-or wrong-typed fields fall back to the config defaults from `newHudSettings`.
-They persist with the character. `hudSettings()` returns the effective table and
-the drawing code reads it instead of `needsConfig.hud` for the toggled options;
-the config keeps supplying geometry, colors, fonts, and icon paths.
+- HUD: meters, hover tooltips, compact bars, always-show values, threshold
+  pulse, and each of the four need bars.
+- Gameplay: warnings, consequences, feedback messages, day/night fatigue, rested
+  bonus, and environment effects, plus a Difficulty selector.
+
+Settings live in `storage.xneedsSettings` and are normalized on read. The shape
+is versioned (`settingsVersion = 2`) with `hud` and `gameplay` sub-tables; the
+old V1.11 flat HUD table is migrated automatically. Missing or wrong-typed fields
+fall back to the config defaults from `newHudSettings` / `newGameplaySettings`.
+`hudSettings()`, `gameplaySettings()`, and `rateScale()` return the effective
+values, and the config keeps supplying geometry, colors, fonts, icon paths, and
+the baseline enable flags.
+
+Gameplay toggles gate their features at the existing read sites: warnings in
+`refreshWarningLevels`, consequences in `currentConsequences` and the tooltip,
+feedback in `queueConsumableFeedback`, circadian in `isNightTime` /
+`circadianGainMultiplier`, rested in `restedActive` / `trackSleepRest`, and
+environment in `needEnvironmentMultiplier` / `environmentDecayMultiplier`.
+Difficulty scales the passive Thirst, awake Fatigue, passive Bladder, and
+Hygiene passive/activity decay through `rateScale()`; recovery is unaffected.
 
 Rendering details:
 
@@ -326,6 +340,9 @@ Rendering details:
   tooltip text color.
 - The threshold pulse brightens a bar for `pulseDuration` seconds when
   `refreshWarningLevels` detects an upward tier crossing.
+- Rows are built by `buildSettingsRows`; headers are labels, toggles flip a
+  boolean in the `hud` or `gameplay` table, and the Difficulty row cycles
+  through the preset list on click.
 
 Input note: the overlay reads `input.mouseDown("MouseLeft")` and the canvas
 mouse position, so a click that toggles a row can also reach the world as a
@@ -545,13 +562,19 @@ Beverages, food, and HUD:
 
 Settings overlay:
 
-1. Run `/xneeds options` and confirm the panel opens centered with all toggles
-   reflecting current values.
-2. Toggle each option and confirm it applies immediately: meters hide, tooltips
-   stop, bars shorten without icons, values appear, and a threshold crossing
-   pulses.
-3. Save and quit, then reload, and confirm the settings persisted.
-4. Close with the button and with `/xneeds options`.
+1. Run `/xneeds options` and confirm the panel opens centered with HUD and
+   Gameplay sections, all toggles reflecting current values, and the Difficulty
+   row showing the active preset.
+2. Toggle each HUD option and confirm it applies immediately: meters hide,
+   tooltips stop, bars shorten without icons, values appear, and a threshold
+   crossing pulses.
+3. Toggle each gameplay option and confirm it takes effect: warnings stop,
+   consequence multipliers clear, feedback stops, and day/night, rested, and
+   environment modifiers report off in `/xneeds get`.
+4. Cycle Difficulty and confirm `/xneeds get` reports the new `rateScale` and
+   that passive gains change accordingly.
+5. Save and quit, then reload, and confirm all settings persisted.
+6. Close with the button and with `/xneeds options`.
 
 Safe removal:
 

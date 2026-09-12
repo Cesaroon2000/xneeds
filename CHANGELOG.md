@@ -3,6 +3,18 @@
 All notable changes to Needs are documented here. Versions follow Semantic
 Versioning while the mod remains in active development.
 
+## [1.12.0] - 2026-09-11
+
+### Added
+
+- Gameplay toggles in the settings overlay: warnings, consequences, feedback
+  messages, day/night fatigue, rested bonus, and environment effects.
+- Difficulty selector in the overlay (Casual 0.75x, Realistic 1.0x, Hardcore
+  1.5x) that scales passive Thirst/Fatigue/Bladder gain and Hygiene decay.
+- Settings storage is now structured (`hud` and `gameplay` tables) with
+  automatic migration from the flat V1.11 shape.
+- `/xneeds get` reports the active difficulty and gameplay toggles.
+
 ## [1.11.0] - 2026-09-11
 
 ### Added

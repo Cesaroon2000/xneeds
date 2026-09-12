@@ -580,6 +580,8 @@ local function needSnapshot()
   }
 end
 
+local settingsVersion = 2
+
 local function newHudSettings()
   local tooltips = needsConfig.hud.tooltips
   return {
@@ -595,8 +597,19 @@ local function newHudSettings()
   }
 end
 
-local function normalizeHudSettings(settings)
-  local defaults = newHudSettings()
+local function newGameplaySettings()
+  return {
+    warnings = needsConfig.warnings.enabled ~= false,
+    consequences = needsConfig.consequences.enabled ~= false,
+    feedback = needsConfig.beverages.feedback.enabled ~= false,
+    circadian = needsConfig.fatigue.circadian.enabled ~= false,
+    rested = needsConfig.fatigue.rested.enabled ~= false,
+    environment = true,
+    rateScale = 1.0
+  }
+end
+
+local function normalizeSettingsTable(settings, defaults)
   if type(settings) ~= "table" then
     settings = {}
   end
@@ -608,14 +621,41 @@ local function normalizeHudSettings(settings)
   return settings
 end
 
-local function hudSettings()
-  storage.xneedsSettings = normalizeHudSettings(storage.xneedsSettings)
+local function normalizeSettings(settings)
+  -- Migrate the V1.11 flat HUD table into the structured form.
+  if type(settings) == "table" and settings.version == nil
+      and settings.enabled ~= nil then
+    settings = { version = settingsVersion, hud = settings }
+  end
+
+  if type(settings) ~= "table" then
+    settings = {}
+  end
+  settings.version = settingsVersion
+  settings.hud = normalizeSettingsTable(settings.hud, newHudSettings())
+  settings.gameplay = normalizeSettingsTable(settings.gameplay, newGameplaySettings())
+  return settings
+end
+
+local function settings()
+  storage.xneedsSettings = normalizeSettings(storage.xneedsSettings)
   return storage.xneedsSettings
 end
 
-local function setHudSetting(key, value)
-  local settings = hudSettings()
-  settings[key] = value
+local function hudSettings()
+  return settings().hud
+end
+
+local function gameplaySettings()
+  return settings().gameplay
+end
+
+local function rateScale()
+  local scale = gameplaySettings().rateScale
+  if not isFiniteNumber(scale) or scale <= 0 then
+    return 1
+  end
+  return scale
 end
 
 local function safeCurrentEmoteIsSleep()
@@ -870,6 +910,9 @@ local function configuredBiomeMultiplier(biomeName, multipliers, patterns)
 end
 
 local function environmentDecayMultiplier(biomeName)
+  if not gameplaySettings().environment then
+    return 1
+  end
   local environment = needsConfig.hygiene.environment
   local multiplier = configuredBiomeMultiplier(
     biomeName,
@@ -934,11 +977,12 @@ local function hygieneEnvironment(elapsed)
 
   local biomeName = currentBiome() or "none"
   local decayMultiplier = environmentDecayMultiplier(biomeName)
-  local passiveLoss = needsConfig.hygiene.decayPerSecond * elapsed * decayMultiplier
+  local scale = rateScale()
+  local passiveLoss = needsConfig.hygiene.decayPerSecond * elapsed * decayMultiplier * scale
   local activityLoss = (
     environment.runningExtraDecayPerSecond * pendingRunningSeconds
       + environment.jumpingExtraDecayPerSecond * pendingJumpingSeconds
-  ) * decayMultiplier
+  ) * decayMultiplier * scale
   local contaminationLoss = 0
   if liquidClass == "dirty" then
     contaminationLoss = environment.dirtyLiquidRatePerSecond
@@ -1031,7 +1075,7 @@ local function refreshWarningLevels(notify)
     local newLevel = needLevel(problemValue(needName))
     local previousLevel = warningLevels[needName] or 0
 
-    if notify and needsConfig.warnings.enabled and newLevel > previousLevel then
+    if notify and gameplaySettings().warnings and newLevel > previousLevel then
       local messages = needsConfig.warnings.messages[needName]
       local key = needsConfig.thresholds[newLevel].key
       local messageText = type(messages) == "table" and messages[key] or nil
@@ -1065,11 +1109,13 @@ local function currentConsequences()
     protection = 1
   }
 
+  local consequencesEnabled = gameplaySettings().consequences
+
   for needName in pairs(needNames) do
     local level = needLevel(problemValue(needName))
     result.levels[needName] = level
 
-    if needsConfig.consequences.enabled and level > 0 then
+    if consequencesEnabled and level > 0 then
       local tierKey = needsConfig.thresholds[level].key
       local profile = needsConfig.consequences.profiles[needName][tierKey]
       for _, dimension in ipairs(consequenceDimensions) do
@@ -1078,7 +1124,7 @@ local function currentConsequences()
     end
   end
 
-  if needsConfig.consequences.enabled then
+  if consequencesEnabled then
     for _, dimension in ipairs(consequenceDimensions) do
       result[dimension] = math.max(
         result[dimension],
@@ -1167,6 +1213,9 @@ local function onCaffeineUpdate(_, _, remaining)
 end
 
 local function needEnvironmentMultiplier(needName, biomeName)
+  if not gameplaySettings().environment then
+    return 1
+  end
   local needConfig = needsConfig[needName]
   local environment = type(needConfig) == "table" and needConfig.environment or nil
   if type(environment) ~= "table" then
@@ -1194,7 +1243,7 @@ end
 
 local function isNightTime()
   local circadian = needsConfig.fatigue.circadian
-  if not circadian.enabled then
+  if not circadian.enabled or not gameplaySettings().circadian then
     return false
   end
 
@@ -1211,7 +1260,7 @@ end
 
 local function circadianGainMultiplier()
   local circadian = needsConfig.fatigue.circadian
-  if not circadian.enabled then
+  if not circadian.enabled or not gameplaySettings().circadian then
     return 1
   end
   if isNightTime() then
@@ -1222,7 +1271,7 @@ end
 
 local function restedActive()
   local rested = needsConfig.fatigue.rested
-  if not rested.enabled then
+  if not rested.enabled or not gameplaySettings().rested then
     return false
   end
   local ok, active = pcall(status.uniqueStatusEffectActive, rested.effect)
@@ -1246,7 +1295,8 @@ local function trackSleepRest(sleeping, dt)
   if wasSleeping then
     wasSleeping = false
     local rested = needsConfig.fatigue.rested
-    if rested.enabled and sleepAccumulatedSeconds >= rested.minimumSleepSeconds then
+    if rested.enabled and gameplaySettings().rested
+        and sleepAccumulatedSeconds >= rested.minimumSleepSeconds then
       status.addEphemeralEffect(rested.effect, rested.durationSeconds, entity.id())
       if rested.message ~= "" then
         player.queueStatusMessage(rested.message)
@@ -1260,6 +1310,7 @@ local function advanceNeeds(elapsed)
   normalizeStorage()
 
   local biomeName = currentBiome() or "none"
+  local scale = rateScale()
 
   if isSleeping() then
     storage.needs.fatigue = storage.needs.fatigue
@@ -1275,20 +1326,21 @@ local function advanceNeeds(elapsed)
       * restedGainMultiplier()
       * needEnvironmentMultiplier("fatigue", biomeName)
     storage.needs.fatigue = storage.needs.fatigue
-      + needsConfig.fatigue.awakeGainPerSecond * fatigueGainMultiplier * elapsed
+      + needsConfig.fatigue.awakeGainPerSecond
+      * fatigueGainMultiplier * scale * elapsed
   end
 
   storage.needs.thirst = storage.needs.thirst
     + needsConfig.thirst.passiveGainPerSecond
     * needEnvironmentMultiplier("thirst", biomeName)
-    * elapsed
+    * scale * elapsed
 
   local reliefRate = bladderReliefRate()
   if reliefRate > 0 then
     storage.needs.bladder = storage.needs.bladder - reliefRate * elapsed
   else
     storage.needs.bladder = storage.needs.bladder
-      + needsConfig.bladder.passiveGainPerSecond * elapsed
+      + needsConfig.bladder.passiveGainPerSecond * scale * elapsed
   end
 
   local hygieneState = hygieneEnvironment(elapsed)
@@ -1490,7 +1542,8 @@ local function configuredBeverageValue(details, parameterName, defaultValue)
 end
 
 local function queueConsumableFeedback(feedback, profileName, thirstRecovery)
-  if not feedback.enabled or beverageFeedbackCooldown > 0 then
+  if not feedback.enabled or not gameplaySettings().feedback
+      or beverageFeedbackCooldown > 0 then
     return
   end
 
@@ -1685,6 +1738,16 @@ local function debugGet(_, isLocal)
   result.rested = restedActive()
   result.thirstEnvironmentMultiplier = needEnvironmentMultiplier("thirst", biomeName)
   result.fatigueEnvironmentMultiplier = needEnvironmentMultiplier("fatigue", biomeName)
+  local gameplay = gameplaySettings()
+  result.settings = {
+    warnings = gameplay.warnings,
+    consequences = gameplay.consequences,
+    feedback = gameplay.feedback,
+    circadian = gameplay.circadian,
+    rested = gameplay.rested,
+    environment = gameplay.environment,
+    rateScale = gameplay.rateScale
+  }
   local consequences = currentConsequences()
   result.penaltyLevel = highestConsequenceLevel()
   result.consequenceLevels = consequences.levels
@@ -1754,7 +1817,7 @@ local function commandStatus()
   local consequences = currentConsequences()
   local hygieneState = hygieneEnvironment(needsConfig.updateInterval)
   return string.format(
-    "^#f3d36a;<Needs V1.11>^reset;\n"
+    "^#f3d36a;<Needs V1.12>^reset;\n"
       .. "Thirst: ^cyan;%.1f^reset; [%s]\n"
       .. "Fatigue: ^cyan;%.1f^reset; [%s]\n"
       .. "Bladder: ^cyan;%.1f^reset; [%s]\n"
@@ -1763,6 +1826,7 @@ local function commandStatus()
       .. "Circadian: %s, rested %s\n"
       .. "Multipliers: speed %.0f%%, jump %.0f%%, power %.0f%%, energy regen %.0f%%, protection %.0f%%\n"
       .. "Environment: biome %s x%.2f, thirst gain x%.2f, fatigue gain x%.2f, liquid %s (%s), rain/wet %s\n"
+      .. "Settings: difficulty x%.2f, warnings %s, consequences %s, feedback %s, circadian %s, rested %s, environment %s\n"
       .. "Hygiene next tick: recovery +%.2f, passive -%.3f, activity -%.3f, liquid -%.3f, combat -%.3f",
     storage.needs.thirst,
     tierLabel(consequences.levels.thirst),
@@ -1790,6 +1854,13 @@ local function commandStatus()
     hygieneState.liquid,
     hygieneState.liquidClass,
     hygieneState.rainEffect and "yes" or "no",
+    gameplaySettings().rateScale,
+    gameplaySettings().warnings and "on" or "off",
+    gameplaySettings().consequences and "on" or "off",
+    gameplaySettings().feedback and "on" or "off",
+    gameplaySettings().circadian and "on" or "off",
+    gameplaySettings().rested and "on" or "off",
+    gameplaySettings().environment and "on" or "off",
     hygieneState.recoveryRate * needsConfig.updateInterval,
     hygieneState.passiveLoss,
     hygieneState.activityLoss,
@@ -2251,7 +2322,7 @@ local function needRecoveryState(needName, sleeping)
 end
 
 local function appendNeedConsequenceLines(lines, needName, textColor)
-  if not needsConfig.consequences.enabled then
+  if not gameplaySettings().consequences then
     table.insert(lines, { text = "Penalties disabled", color = textColor })
     return
   end
@@ -2523,36 +2594,85 @@ local function drawNeedBar(needName, y, ratio, color, iconPath)
   }
 end
 
-local settingsRowDefs = {
-  { label = "HUD meters", key = "enabled" },
-  { label = "Hover tooltips", key = "tooltips" },
-  { label = "Compact bars", key = "compact" },
-  { label = "Always show values", key = "alwaysShowValues" },
-  { label = "Pulse on threshold", key = "pulse" },
-  { label = "Thirst bar", key = "showThirst" },
-  { label = "Fatigue bar", key = "showFatigue" },
-  { label = "Bladder bar", key = "showBladder" },
-  { label = "Hygiene bar", key = "showHygiene" }
+local difficultyOptions = {
+  { label = "Casual", value = 0.75 },
+  { label = "Realistic", value = 1.0 },
+  { label = "Hardcore", value = 1.5 }
 }
+
+local function settingsTable(name)
+  if name == "gameplay" then
+    return gameplaySettings()
+  end
+  return hudSettings()
+end
+
+local function buildSettingsRows()
+  return {
+    { kind = "header", label = "HUD" },
+    { kind = "toggle", label = "HUD meters", table = "hud", key = "enabled" },
+    { kind = "toggle", label = "Hover tooltips", table = "hud", key = "tooltips" },
+    { kind = "toggle", label = "Compact bars", table = "hud", key = "compact" },
+    { kind = "toggle", label = "Always show values", table = "hud", key = "alwaysShowValues" },
+    { kind = "toggle", label = "Pulse on threshold", table = "hud", key = "pulse" },
+    { kind = "toggle", label = "Thirst bar", table = "hud", key = "showThirst" },
+    { kind = "toggle", label = "Fatigue bar", table = "hud", key = "showFatigue" },
+    { kind = "toggle", label = "Bladder bar", table = "hud", key = "showBladder" },
+    { kind = "toggle", label = "Hygiene bar", table = "hud", key = "showHygiene" },
+    { kind = "header", label = "Gameplay" },
+    { kind = "toggle", label = "Warnings", table = "gameplay", key = "warnings" },
+    { kind = "toggle", label = "Consequences", table = "gameplay", key = "consequences" },
+    { kind = "toggle", label = "Feedback", table = "gameplay", key = "feedback" },
+    { kind = "toggle", label = "Day/night fatigue", table = "gameplay", key = "circadian" },
+    { kind = "toggle", label = "Rested bonus", table = "gameplay", key = "rested" },
+    { kind = "toggle", label = "Environment effects", table = "gameplay", key = "environment" },
+    { kind = "cycle", label = "Difficulty", table = "gameplay", key = "rateScale" }
+  }
+end
+
+local function difficultyLabel(value)
+  for _, option in ipairs(difficultyOptions) do
+    if math.abs(option.value - value) < 0.001 then
+      return option.label
+    end
+  end
+  return string.format("%.2f", value)
+end
+
+local function advanceDifficulty(value)
+  local current = 1
+  for index, option in ipairs(difficultyOptions) do
+    if math.abs(option.value - value) < 0.001 then
+      current = index
+      break
+    end
+  end
+  local nextIndex = current + 1
+  if nextIndex > #difficultyOptions then
+    nextIndex = 1
+  end
+  return difficultyOptions[nextIndex].value
+end
 
 local settingsRowRects = {}
 local settingsCloseRect
 
-local function settingsLayout()
+local function settingsLayout(rowCount)
   local canvasSize = hudCanvas:size()
-  local width = 210
-  local rowHeight = 16
+  local width = 224
+  local rowHeight = 15
   local padding = 12
   local titleHeight = 22
   local closeArea = 28
-  local height = titleHeight + #settingsRowDefs * rowHeight + closeArea + padding
+  local height = titleHeight + rowCount * rowHeight + closeArea + padding
   local left = math.floor((canvasSize[1] - width) / 2)
   local bottom = math.floor((canvasSize[2] - height) / 2)
   return {left, bottom, left + width, bottom + height}, width, rowHeight, padding, titleHeight
 end
 
 local function drawSettingsOverlay()
-  local rect, width, rowHeight, padding, titleHeight = settingsLayout()
+  local rows = buildSettingsRows()
+  local rect, width, rowHeight, padding, titleHeight = settingsLayout(#rows)
   local left, bottom, right, top = rect[1], rect[2], rect[3], rect[4]
   local canvasSize = hudCanvas:size()
   local textColor = hudTextColor()
@@ -2575,42 +2695,61 @@ local function drawSettingsOverlay()
   )
 
   local mouse = hudCanvas:mousePosition()
-  local settings = hudSettings()
   local firstRowTop = top - titleHeight - 4
   settingsRowRects = {}
-  for index, def in ipairs(settingsRowDefs) do
+  for index, row in ipairs(rows) do
     local rowTop = firstRowTop - (index - 1) * rowHeight
     local rowRect = {left + padding, rowTop - rowHeight, right - padding, rowTop}
     settingsRowRects[index] = rowRect
 
-    if pointInsideRect(mouse, rowRect) then
-      hudCanvas:drawRect(rowRect, {22, 51, 75, 200})
-    end
+    if row.kind == "header" then
+      hudCanvas:drawText(
+        row.label,
+        {
+          position = {rowRect[1] + 2, rowRect[2] + rowHeight / 2},
+          horizontalAnchor = "left",
+          verticalAnchor = "mid"
+        },
+        8,
+        hudAccentColor()
+      )
+    else
+      if pointInsideRect(mouse, rowRect) then
+        hudCanvas:drawRect(rowRect, {22, 51, 75, 200})
+      end
 
-    local boxSize = 10
-    local boxLeft = rowRect[1] + 2
-    local boxBottom = rowRect[2] + (rowHeight - boxSize) / 2
-    hudCanvas:drawRect(
-      {boxLeft, boxBottom, boxLeft + boxSize, boxBottom + boxSize},
-      needsConfig.hud.borderColor
-    )
-    if settings[def.key] then
+      local target = settingsTable(row.table)
+      local boxSize = 9
+      local boxLeft = rowRect[1] + 2
+      local boxBottom = rowRect[2] + (rowHeight - boxSize) / 2
       hudCanvas:drawRect(
-        {boxLeft + 2, boxBottom + 2, boxLeft + boxSize - 2, boxBottom + boxSize - 2},
+        {boxLeft, boxBottom, boxLeft + boxSize, boxBottom + boxSize},
+        needsConfig.hud.borderColor
+      )
+
+      local label = row.label
+      if row.kind == "toggle" then
+        if target[row.key] then
+          hudCanvas:drawRect(
+            {boxLeft + 2, boxBottom + 2, boxLeft + boxSize - 2, boxBottom + boxSize - 2},
+            textColor
+          )
+        end
+      else
+        label = row.label .. ": " .. difficultyLabel(target[row.key])
+      end
+
+      hudCanvas:drawText(
+        label,
+        {
+          position = {boxLeft + boxSize + 6, rowRect[2] + rowHeight / 2},
+          horizontalAnchor = "left",
+          verticalAnchor = "mid"
+        },
+        8,
         textColor
       )
     end
-
-    hudCanvas:drawText(
-      def.label,
-      {
-        position = {boxLeft + boxSize + 6, rowRect[2] + rowHeight / 2},
-        horizontalAnchor = "left",
-        verticalAnchor = "mid"
-      },
-      8,
-      textColor
-    )
   end
 
   local closeTop = bottom + padding + 16
@@ -2663,11 +2802,18 @@ local function handleSettingsClick()
     return
   end
 
-  local settings = hudSettings()
+  local rows = buildSettingsRows()
   for index, rowRect in ipairs(settingsRowRects) do
     if pointInsideRect(mouse, rowRect) then
-      local def = settingsRowDefs[index]
-      settings[def.key] = not settings[def.key]
+      local row = rows[index]
+      if row and row.kind ~= "header" then
+        local target = settingsTable(row.table)
+        if row.kind == "toggle" then
+          target[row.key] = not target[row.key]
+        else
+          target[row.key] = advanceDifficulty(target[row.key])
+        end
+      end
       return
     end
   end
