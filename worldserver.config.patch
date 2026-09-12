@@ -1,7 +1,0 @@
-[
-  {
-    "op" : "add",
-    "path" : "/scriptContexts/xneeds_v0",
-    "value" : [ "/scripts/xneeds_v0/world_server.lua" ]
-  }
-]

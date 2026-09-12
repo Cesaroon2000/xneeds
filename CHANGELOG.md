@@ -3,6 +3,26 @@
 All notable changes to Needs are documented here. Versions follow Semantic
 Versioning while the mod remains in active development.
 
+## [1.7.0] - 2026-09-11
+
+### Added
+
+- Configurable container returns under `beverages.returnItems`. By default,
+  drinking Bottled Water gives back an Empty Bottle.
+
+### Changed
+
+- Normal sleeping now fully restores Fatigue in about three minutes.
+- Sleep no longer changes the application time scale. Sleeping uses normal game
+  speed, which removes the broken interaction and Save & Quit hang observed
+  after whole-game acceleration in singleplayer.
+
+### Removed
+
+- The clickable sleep fast-forward button, the `/timescale` path, the silent
+  fast-forward probes, and the world-server relay script and patch. The mod now
+  adds only its player script context.
+
 ## [1.6.0] - 2026-09-11
 
 ### Added

@@ -1,4 +1,4 @@
-# Needs V1.6.0 development notes
+# Needs V1.7.0 development notes
 
 ## Architecture and persistence
 
@@ -31,7 +31,7 @@ All tuning is centralized in /xneeds_v0.config.
 | Need | Passive default | Recovery |
 | --- | --- | --- |
 | Thirst | 0 to 100 in about 2 hours | Beverage-profile dependent |
-| Fatigue | 0 to 100 in about 4 awake hours | Sleeping recovers 100 in about 5 minutes |
+| Fatigue | 0 to 100 in about 4 awake hours | Sleeping recovers 100 in about 3 minutes |
 | Bladder | 0 to 100 in about 6 passive hours | Loungeable toilets relieve 5 points per second |
 | Hygiene | 100 to 0 in about 8 inactive hours | Clean water, rain, and bathing fixtures restore Hygiene |
 
@@ -97,6 +97,12 @@ Optional beverage feedback uses short status messages for caffeine, alcohol,
 salty, toxic, or otherwise dehydrating drinks. A shared configurable cooldown
 prevents rapid consumption from flooding the screen. The messages, cooldown,
 and feature toggle are under `beverages.feedback`.
+
+`beverages.returnItems` grants a container back when a listed item is consumed,
+through `player.giveItem`. The default map returns an Empty Bottle for Bottled
+Water. Entries are case-insensitive item-name pairs, the grant runs once on the
+local consumption event, and the feature can be disabled with its `enabled`
+flag. Foods or other drinks can be added the same way.
 
 `/xneeds beverage <itemName>` reports the resolved profile and its source
 (explicit item parameter, exact mapping, classification rule, or default). It
@@ -180,34 +186,24 @@ while a character is currently penalized, set penalties.enabled to false, load
 that character once, save, and exit cleanly so the namespaced modifier is
 cleared.
 
-## Sleep fast-forward
+## Sleeping
 
-While genuinely sleeping in a bed, a small **1.5x SLEEP** button appears beneath
-the Needs meters. Click it to start fast-forward; it changes into a stop button
-until clicked again or the player leaves the bed. The button is drawn on the
-same scale-aware HUD canvas as the meters.
+Sleeping is detected exactly as before: the player is lounging and either using
+the sleep emote, under a configured bed effect, or lounging in an object whose
+`sitEmote` is sleep. Detection is defined by `sleep.bedEffects` in
+/xneeds_v0.config.
 
-Before changing application speed, the client asks the current world server for
-a safety decision over direct entity messaging. Whole-game 1.5x time is enabled
-only when the requesting client is the local host and exactly one client is
-connected. The decision is refreshed every two game seconds while fast-forward
-is active. If another player connects, the next check restores 1x speed. Safety
-probes and decisions never enter chat or run during universe shutdown.
+While sleeping, Fatigue recovers at `fatigue.sleepRecoveryPerSecond`, tuned so a
+full 0-to-100 recharge takes about three minutes. Awake Fatigue gain is
+unaffected, and caffeine still pauses awake gain.
 
-On a remote/dedicated server, with multiple clients, or if the probe cannot be
-confirmed, application time is never changed. By default the same button instead
-runs only this player's Needs simulation at 1.5x while sleeping. This preserves
-the useful faster Fatigue recovery without accelerating or desynchronizing the
-shared world. The fallback can be disabled independently.
-
-The normal Needs update cadence is 0.25 game seconds. Both the world and the
-Needs script receive xStarbound's scaled delta time in local single-player, so
-Needs advance at 1.5x exactly once; the multiplayer fallback applies its own 1.5x
-multiplier because shared-world time remains at 1x.
-
-All values are under sleep.fastForward in /xneeds_v0.config. Because
-xStarbound's timescale API is exposed as a client command, entering and leaving
-whole-game fast-forward adds the normal `/timescale` result lines to chat.
+Sleep acceleration and all application time-scale changes were removed in V1.7.
+Earlier builds changed the whole-game `/timescale` and, in multiplayer, ran a
+Needs-only fallback coordinated by a world-server probe. In singleplayer that
+path could show a false multiplayer message, break world interaction after
+leaving the bed, and hang on Save & Quit. The mod now never touches the game
+clock, sends no chat commands, and adds no world-server or universe callbacks,
+so sleeping is safe to interrupt and Save & Quit is unaffected.
 
 ## HUD
 
@@ -244,8 +240,7 @@ rectangles, a compact border-and-fill panel is drawn to the right of the meter
 icons. It lists the need name, the problem-aligned numeric value, the current
 tier, any active recovery state, and the active penalty dimensions for that
 need. The panel is clamped to the canvas, and if there is not enough room to the
-right it is placed to the left instead. It is anchored to the hovered row so it
-never crosses the status-effect row above or the sleep button below, and it is
+right it is placed to the left instead. It is anchored to the hovered row and
 drawn only while hovered, so no permanent labels are added. Tooltip geometry,
 fonts, and tier colors live under hud.tooltips; disabling it leaves the meters
 and all other HUD behavior untouched. Hygiene recovery source selection is
@@ -309,9 +304,9 @@ The original message interface remains available through xStarbound /exec:
     /exec return world.sendEntityMessage(player.id(),"xneeds_v0.reset"):result()
 
 The get result includes sleeping, caffeinated, caffeineRemainingSeconds,
-caffeineRemaining, bladderReliefRate, hygieneRecoveryRate,
+caffeineRemaining, bladderReliefRate, hygieneRecoveryRate, restRecoveryPerSecond,
 hygieneEnvironment, lastHygieneEnvironment, pendingCombatDirtiness,
-sleepFastForward state, penaltyLevel, consequenceLevels, and
+penaltyLevel, consequenceLevels, and
 consequenceMultipliers. The command output
 also reports the current biome multiplier, liquid classification, rain/wet
 state, and projected next-tick Hygiene breakdown. Debug handlers reject
@@ -319,9 +314,7 @@ non-local messages.
 
 ## Compatibility boundaries
 
-The player.config.patch adds /genericScriptContexts/xneeds_v0. An additive world
-server patch provides the direct multiplayer safety relay without wrapping
-universe connection or shutdown hooks. A
+The player.config.patch adds /genericScriptContexts/xneeds_v0. A
 post-load preprocessor generates additive
 patches for final category-drink consumables after FU and Workshop content are
 loaded. It appends a notifier to their effect groups; it does not replace item
@@ -350,10 +343,10 @@ Persistence and teardown:
 
 Sleep and time:
 
-1. Sleep in a bed and confirm the `1.5x SLEEP` button appears.
-2. Click it, let it activate, then wake. Run `/timescale` and confirm it is back
-   to `1.000000`.
-3. Confirm normal sleeping still restores Fatigue in roughly five minutes.
+1. Sleep in a bed and confirm no button appears and the game remains at normal
+   speed (`/timescale` reads `1.000000` throughout).
+2. Confirm sleeping restores Fatigue from 100 to 0 in roughly three minutes.
+3. Get out of the bed and confirm movement and world interaction still work.
 4. Confirm a caffeine drink counts down from `5:00` at 1x wall-clock while
    `/xneeds get` reports `Caffeinated: yes (m:ss remaining)`.
 
@@ -370,7 +363,7 @@ Beverages and HUD:
 2. Spot-check water, coffee, soda, alcohol, salty, and toxic examples with
    `/xneeds beverage <itemName>`.
 3. Hover each need meter and confirm name, value, tier, recovery, and penalty
-   rows are correct and do not overlap the status row or the sleep button.
+   rows are correct and do not overlap the status row.
 4. Change interface scale and window size and confirm the meters and tooltips
    stay aligned.
 

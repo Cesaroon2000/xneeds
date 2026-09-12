@@ -4,7 +4,7 @@ Needs is an xStarbound survival-simulation mod that adds Thirst, Fatigue,
 Bladder, and Hygiene to the player without replacing the vanilla or Frackin'
 Universe HUD.
 
-Current version: **1.6.0**
+Current version: **1.7.0**
 
 ![Needs HUD preview](_previewimage.png)
 
@@ -33,11 +33,12 @@ supported.
   solid-food profiles, with exact mappings for misclassified FU items.
 - Caffeine relief with remaining-time reporting, alcohol fatigue, dehydration,
   and bladder effects.
+- Configurable container returns, such as getting an Empty Bottle back after
+  drinking Bottled Water.
 - Toilet relief and Hygiene recovery from baths, showers, clean liquids, and
   rain.
 - Hygiene loss from activity, combat, dirty liquids, and harsh environments.
-- A clickable 1.5x single-player sleep button with a multiplayer-safe Needs-only
-  fallback.
+- Normal sleeping fully restores Fatigue in about three minutes.
 - Local testing and beverage-diagnostic commands.
 
 ## Installation
@@ -63,11 +64,12 @@ All gameplay and presentation tuning is centralized in
 
 Important sections include:
 
-- `beverages`: profiles, classification rules, FU exceptions, caffeine, and
-  feedback.
+- `beverages`: profiles, classification rules, FU exceptions, caffeine,
+  feedback, and container returns.
 - `thresholds`, `consequences`, and `warnings`: severity and penalties.
 - `hygiene.environment` and `hygiene.combat`: environmental Dirtiness.
-- `sleep.fastForward`: sleep button, timescale, and multiplayer fallback.
+- `sleep.bedEffects` and `fatigue.sleepRecoveryPerSecond`: sleep detection and
+  rest recovery.
 - `hud`: visibility, spacing, colors, native icon paths, and the optional
   hover tooltips.
 - `debug`: local testing controls and logging.
@@ -116,20 +118,16 @@ exception. Pass `all`, a profile name, or a name fragment to change the listing.
 effect text the classifier sees, which makes it easy to identify unfamiliar
 items or patched asset sources.
 
-## Sleep acceleration
+## Sleeping
 
-The `1.5x SLEEP` button appears only while the primary player is genuinely
-sleeping. Whole-game acceleration is allowed only for the local host when it is
-the sole connected client.
-
-On a dedicated server or with multiple players, the same button accelerates
-only that player's Needs recovery. Silent direct probes recheck the connection
-state without producing chat entries. Leaving the bed or clicking the button
-again restores normal speed.
+Sleeping in a recognized bed accelerates Fatigue recovery so a full recharge
+takes about three minutes. The mod never changes the application time scale or
+sends chat commands, avoiding the interaction and save-and-quit problems that
+game-clock acceleration caused. Leaving the bed stops the recovery.
 
 ## Compatibility
 
-- The mod adds its own player and world-server script contexts.
+- The mod adds its own player script context only.
 - It reads the final loaded hunger-bar geometry instead of replacing
   `teambar.config`.
 - Drink hooks are appended after Workshop assets load; existing effects remain

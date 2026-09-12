@@ -18,21 +18,7 @@ local pendingJumpingSeconds = 0
 local lastHygieneEnvironment = {}
 local beverageFeedbackCooldown = 0
 local caffeineRemainingSeconds = 0
-local fastForwardButtonRect
 local hudBarRects = {}
-local sleepFastForward = {
-  mode = "idle",
-  requested = false,
-  token = nil,
-  confirmedToken = nil,
-  sequence = 0,
-  probeElapsed = 0,
-  recheckRemaining = 0,
-  timeScaled = false,
-  sleepWasActive = false,
-  activationNotified = false,
-  fallbackNotified = false
-}
 
 local needNames = {
   thirst = true,
@@ -317,37 +303,23 @@ local function loadConfig()
     end
   end
 
+  local returnItems = beverages.returnItems
+  if type(returnItems) ~= "table" or type(returnItems.enabled) ~= "boolean"
+      or type(returnItems.items) ~= "table" then
+    error("[xneeds_v0] beverages.returnItems configuration is invalid")
+  end
+  for consumedName, grantedName in pairs(returnItems.items) do
+    if type(consumedName) ~= "string" or consumedName == ""
+        or type(grantedName) ~= "string" or grantedName == "" then
+      error("[xneeds_v0] beverages.returnItems contains an invalid mapping")
+    end
+  end
+
   requireStringList(config.bladder.reliefObjectNamePatterns, "bladder.reliefObjectNamePatterns")
   requireStringList(config.hygiene.cleanLiquidNames, "hygiene.cleanLiquidNames")
   requireStringList(config.hygiene.activeFixtureObjectNames, "hygiene.activeFixtureObjectNames")
   requireStringList(config.hygiene.loungeObjectNamePatterns, "hygiene.loungeObjectNamePatterns")
   requireStringList(config.sleep.bedEffects, "sleep.bedEffects")
-
-  local fastForward = config.sleep.fastForward
-  if type(fastForward) ~= "table"
-      or type(fastForward.enabled) ~= "boolean"
-      or type(fastForward.multiplayerFallbackEnabled) ~= "boolean"
-      or type(fastForward.showMessages) ~= "boolean" then
-    error("[xneeds_v0] sleep.fastForward configuration is invalid")
-  end
-  requirePositiveNumber(fastForward.timeScale, "sleep.fastForward.timeScale")
-  requirePositiveNumber(fastForward.restoreTimeScale, "sleep.fastForward.restoreTimeScale")
-  requirePositiveNumber(
-    fastForward.probeTimeoutSeconds,
-    "sleep.fastForward.probeTimeoutSeconds"
-  )
-  requirePositiveNumber(fastForward.recheckSeconds, "sleep.fastForward.recheckSeconds")
-  requirePositiveNumber(
-    fastForward.multiplayerNeedsScale,
-    "sleep.fastForward.multiplayerNeedsScale"
-  )
-  requirePositiveNumber(fastForward.buttonWidth, "sleep.fastForward.buttonWidth")
-  requirePositiveNumber(fastForward.buttonHeight, "sleep.fastForward.buttonHeight")
-  requireNonnegativeNumber(fastForward.buttonGap, "sleep.fastForward.buttonGap")
-  requireColor(fastForward.buttonColor, "sleep.fastForward.buttonColor")
-  requireColor(fastForward.buttonHoverColor, "sleep.fastForward.buttonHoverColor")
-  requireColor(fastForward.buttonActiveColor, "sleep.fastForward.buttonActiveColor")
-  requireColor(fastForward.buttonTextColor, "sleep.fastForward.buttonTextColor")
 
   if type(config.warnings.enabled) ~= "boolean"
       or type(config.warnings.messages) ~= "table" then
@@ -602,88 +574,6 @@ local function isSleeping()
     or loungingObjectUsesSleepEmote()
 end
 
-local function isPrimaryPlayer()
-  if type(world.primaryPlayer) ~= "function" then
-    return true
-  end
-  local ok, primaryPlayerId = pcall(world.primaryPlayer)
-  return not ok or primaryPlayerId == entity.id()
-end
-
-local function setApplicationTimeScale(scale)
-  if type(chat) ~= "table" or type(chat.command) ~= "function" then
-    return false
-  end
-  local ok = pcall(
-    chat.command,
-    string.format("/timescale %.6f", scale),
-    false
-  )
-  return ok
-end
-
-local function stopApplicationFastForward()
-  if sleepFastForward.timeScaled then
-    setApplicationTimeScale(needsConfig.sleep.fastForward.restoreTimeScale)
-    sleepFastForward.timeScaled = false
-  end
-end
-
-local function resetSleepFastForward()
-  stopApplicationFastForward()
-  sleepFastForward.mode = "idle"
-  sleepFastForward.requested = false
-  sleepFastForward.token = nil
-  sleepFastForward.confirmedToken = nil
-  sleepFastForward.probeElapsed = 0
-  sleepFastForward.recheckRemaining = 0
-  sleepFastForward.activationNotified = false
-  sleepFastForward.fallbackNotified = false
-end
-
-local function sendFastForwardProbe()
-  sleepFastForward.sequence = sleepFastForward.sequence + 1
-  sleepFastForward.token = string.format(
-    "%s-%s",
-    player.uniqueId(),
-    sleepFastForward.sequence
-  )
-  sleepFastForward.probeElapsed = 0
-
-  local ok = pcall(function()
-    world.sendEntityMessage(
-      "server",
-      "xneeds_v0.fastForwardProbe",
-      player.uniqueId(),
-      sleepFastForward.token
-    )
-  end)
-  if not ok then
-    sleepFastForward.token = nil
-    sleepFastForward.mode = "multiplayer"
-  end
-end
-
-local function onFastForwardState(_, _, token, allowed)
-  if type(token) ~= "string"
-      or (token ~= sleepFastForward.token
-        and token ~= sleepFastForward.confirmedToken) then
-    return
-  end
-
-  sleepFastForward.token = nil
-  sleepFastForward.probeElapsed = 0
-  sleepFastForward.recheckRemaining = needsConfig.sleep.fastForward.recheckSeconds
-  if allowed == true then
-    sleepFastForward.confirmedToken = token
-    sleepFastForward.mode = "singleplayer"
-  else
-    sleepFastForward.confirmedToken = nil
-    sleepFastForward.mode = "multiplayer"
-    stopApplicationFastForward()
-  end
-end
-
 local function pointInsideRect(point, rect)
   return type(point) == "table"
     and type(rect) == "table"
@@ -691,126 +581,6 @@ local function pointInsideRect(point, rect)
     and point[1] <= rect[3]
     and point[2] >= rect[2]
     and point[2] <= rect[4]
-end
-
-local function fastForwardButtonClicked()
-  if not hudCanvas
-      or not fastForwardButtonRect
-      or type(input) ~= "table"
-      or type(input.mouseDown) ~= "function" then
-    return false
-  end
-
-  local ok, clicks = pcall(input.mouseDown, "MouseLeft")
-  if not ok or type(clicks) ~= "table" or #clicks == 0 then
-    return false
-  end
-  local positionOk, mousePosition = pcall(function()
-    return hudCanvas:mousePosition()
-  end)
-  return positionOk and pointInsideRect(mousePosition, fastForwardButtonRect)
-end
-
-local function updateSleepFastForward(dt, sleeping)
-  local fastForward = needsConfig.sleep.fastForward
-  local primaryPlayer = isPrimaryPlayer()
-
-  if fastForward.enabled
-      and sleeping
-      and primaryPlayer
-      and fastForwardButtonClicked() then
-    if sleepFastForward.requested then
-      resetSleepFastForward()
-    else
-      sleepFastForward.requested = true
-    end
-  end
-
-  local canUse = fastForward.enabled
-    and sleeping
-    and primaryPlayer
-    and sleepFastForward.requested
-
-  if not sleeping then
-    if sleepFastForward.sleepWasActive then
-      resetSleepFastForward()
-    end
-    sleepFastForward.sleepWasActive = false
-    return 1
-  end
-
-  if not sleepFastForward.sleepWasActive then
-    sleepFastForward.sleepWasActive = true
-    if fastForward.enabled and fastForward.showMessages then
-      player.queueStatusMessage(string.format(
-        "Click the %.1fx SLEEP button to fast-forward.",
-        fastForward.timeScale
-      ))
-    end
-  end
-
-  if not canUse then
-    if sleepFastForward.mode ~= "idle" or sleepFastForward.timeScaled then
-      resetSleepFastForward()
-    end
-    return 1
-  end
-
-  if sleepFastForward.mode == "idle" then
-    sleepFastForward.mode = "pending"
-    sendFastForwardProbe()
-  end
-
-  if sleepFastForward.token then
-    sleepFastForward.probeElapsed = sleepFastForward.probeElapsed + dt
-    if sleepFastForward.probeElapsed >= fastForward.probeTimeoutSeconds then
-      sleepFastForward.token = nil
-      sleepFastForward.mode = "multiplayer"
-      sleepFastForward.recheckRemaining = fastForward.recheckSeconds
-      stopApplicationFastForward()
-    end
-  end
-
-  if sleepFastForward.mode == "singleplayer" then
-    if not sleepFastForward.timeScaled then
-      sleepFastForward.timeScaled = setApplicationTimeScale(fastForward.timeScale)
-      if not sleepFastForward.timeScaled then
-        sleepFastForward.mode = "multiplayer"
-      elseif fastForward.showMessages and not sleepFastForward.activationNotified then
-        player.queueStatusMessage(string.format(
-          "Sleep fast-forward: %.1fx.",
-          fastForward.timeScale
-        ))
-        sleepFastForward.activationNotified = true
-      end
-    end
-
-    sleepFastForward.recheckRemaining = sleepFastForward.recheckRemaining - dt
-    if sleepFastForward.recheckRemaining <= 0 and not sleepFastForward.token then
-      sleepFastForward.recheckRemaining = fastForward.recheckSeconds
-      sendFastForwardProbe()
-    end
-    return 1
-  end
-
-  if sleepFastForward.mode == "multiplayer" then
-    if fastForward.showMessages and not sleepFastForward.fallbackNotified then
-      player.queueStatusMessage(
-        "Multiplayer-safe sleep: only your Needs simulation is accelerated."
-      )
-      sleepFastForward.fallbackNotified = true
-    end
-    if fastForward.multiplayerFallbackEnabled then
-      sleepFastForward.recheckRemaining = sleepFastForward.recheckRemaining - dt
-      if sleepFastForward.recheckRemaining <= 0 and not sleepFastForward.token then
-        sleepFastForward.recheckRemaining = fastForward.recheckSeconds
-        sendFastForwardProbe()
-      end
-      return fastForward.multiplayerNeedsScale
-    end
-  end
-
-  return 1
 end
 
 local function bladderReliefRate()
@@ -1454,6 +1224,23 @@ local function queueBeverageFeedback(profileName, thirstRecovery)
   end
 end
 
+local function grantConsumedReturn(itemName)
+  local returnItems = needsConfig.beverages.returnItems
+  if not returnItems.enabled then
+    return
+  end
+
+  local grantedName = returnItems.items[string.lower(itemName)]
+  if type(grantedName) ~= "string" or grantedName == "" then
+    return
+  end
+
+  player.giveItem({name = grantedName, count = 1})
+  if needsConfig.debug.logDrinkEvents then
+    sb.logInfo("[xneeds_v0] returned %s for %s", grantedName, itemName)
+  end
+end
+
 local function onConsumedItem(_, isLocal, itemName)
   -- The generated one-shot drink effect forwards the consumed item name here.
   if not isLocal then
@@ -1464,6 +1251,8 @@ local function onConsumedItem(_, isLocal, itemName)
   if not details then
     return
   end
+
+  grantConsumedReturn(itemName)
 
   local profileName, profile = beverageProfile(itemName, details)
 
@@ -1560,12 +1349,7 @@ local function debugGet(_, isLocal)
   result.hygieneEnvironment = hygieneState
   result.lastHygieneEnvironment = lastHygieneEnvironment
   result.pendingCombatDirtiness = pendingCombatDirtiness
-  result.sleepFastForward = {
-    enabled = needsConfig.sleep.fastForward.enabled,
-    mode = sleepFastForward.mode,
-    wholeGameTimeScaled = sleepFastForward.timeScaled,
-    multiplayerFallbackEnabled = needsConfig.sleep.fastForward.multiplayerFallbackEnabled
-  }
+  result.restRecoveryPerSecond = needsConfig.fatigue.sleepRecoveryPerSecond
   local consequences = currentConsequences()
   result.penaltyLevel = highestConsequenceLevel()
   result.consequenceLevels = consequences.levels
@@ -1635,13 +1419,12 @@ local function commandStatus()
   local consequences = currentConsequences()
   local hygieneState = hygieneEnvironment(needsConfig.updateInterval)
   return string.format(
-    "^#f3d36a;<Needs V1.6>^reset;\n"
+    "^#f3d36a;<Needs V1.7>^reset;\n"
       .. "Thirst: ^cyan;%.1f^reset; [%s]\n"
       .. "Fatigue: ^cyan;%.1f^reset; [%s]\n"
       .. "Bladder: ^cyan;%.1f^reset; [%s]\n"
       .. "Hygiene: ^cyan;%.1f^reset; (dirtiness %.1f) [%s]\n"
       .. "Caffeinated: %s\n"
-      .. "Sleep fast-forward: %s%s\n"
       .. "Multipliers: speed %.0f%%, jump %.0f%%, power %.0f%%, energy regen %.0f%%, protection %.0f%%\n"
       .. "Environment: biome %s x%.2f, liquid %s (%s), rain/wet %s\n"
       .. "Hygiene next tick: recovery +%.2f, passive -%.3f, activity -%.3f, liquid -%.3f, combat -%.3f",
@@ -1657,8 +1440,6 @@ local function commandStatus()
     caffeineActive()
       and ("yes (" .. formatDuration(caffeineRemaining()) .. " remaining)")
       or "no",
-    sleepFastForward.mode,
-    sleepFastForward.timeScaled and " (whole game)" or "",
     consequences.speed * 100,
     consequences.jump * 100,
     consequences.power * 100,
@@ -2269,58 +2050,12 @@ local function drawNeedBar(needName, y, ratio, color, iconPath)
   }
 end
 
-local function drawFastForwardButton(y)
-  local fastForward = needsConfig.sleep.fastForward
-  local width = math.min(fastForward.buttonWidth, hudLayout.width)
-  local height = fastForward.buttonHeight
-  local x = hudLayout.x
-  fastForwardButtonRect = {x, y, x + width, y + height}
-
-  local mousePosition = hudCanvas:mousePosition()
-  local hovered = pointInsideRect(mousePosition, fastForwardButtonRect)
-  local fillColor = hovered and fastForward.buttonHoverColor
-    or fastForward.buttonColor
-  if sleepFastForward.requested then
-    fillColor = fastForward.buttonActiveColor
-  end
-
-  hudCanvas:drawRect(fastForwardButtonRect, needsConfig.hud.borderColor)
-  hudCanvas:drawRect(
-    {x + 1, y + 1, x + width - 1, y + height - 1},
-    fillColor
-  )
-
-  local scaleLabel = string.format("%.1fx", fastForward.timeScale)
-  scaleLabel = string.gsub(scaleLabel, "%.0x$", "x")
-  local label = scaleLabel .. " SLEEP"
-  if sleepFastForward.requested then
-    if sleepFastForward.mode == "pending" then
-      label = "CHECKING..."
-    elseif sleepFastForward.mode == "multiplayer" then
-      label = "STOP NEEDS"
-    else
-      label = "STOP " .. scaleLabel
-    end
-  end
-  hudCanvas:drawText(
-    label,
-    {
-      position = {x + width / 2, y + height / 2},
-      horizontalAnchor = "mid",
-      verticalAnchor = "mid"
-    },
-    7,
-    fastForward.buttonTextColor
-  )
-end
-
 local function drawHud(sleeping)
   if not hudCanvas then
     return
   end
 
   hudCanvas:clear()
-  fastForwardButtonRect = nil
   hudBarRects = {}
 
   local canvasSize = hudCanvas:size()
@@ -2359,17 +2094,6 @@ local function drawHud(sleeping)
     )
   end
 
-  if sleeping
-      and isPrimaryPlayer()
-      and needsConfig.sleep.fastForward.enabled then
-    local occupiedRows = needsConfig.hud.enabled and 4 or 1
-    local buttonY = firstY
-      - step * (occupiedRows - 1)
-      - needsConfig.sleep.fastForward.buttonGap
-      - needsConfig.sleep.fastForward.buttonHeight
-    drawFastForwardButton(buttonY)
-  end
-
   if needsConfig.hud.enabled and needsConfig.hud.tooltips.enabled then
     local hovered = hoveredNeedName()
     if hovered then
@@ -2387,7 +2111,7 @@ function init()
   _, damageInflictedHeartbeat = status.inflictedDamageSince()
   refreshWarningLevels(false)
 
-  if needsConfig.hud.enabled or needsConfig.sleep.fastForward.enabled then
+  if needsConfig.hud.enabled then
     hudLayout = loadHudLayout()
     if hudLayout then
       hudCanvas = interface.bindCanvas(needsConfig.hud.canvasName)
@@ -2402,7 +2126,6 @@ function init()
   message.setHandler("xneeds_v0.get", debugGet)
   message.setHandler("xneeds_v0.set", debugSet)
   message.setHandler("xneeds_v0.reset", debugReset)
-  message.setHandler("xneeds_v0.fastForwardState", onFastForwardState)
   if needsConfig.debug.commandsEnabled then
     message.setHandler({
       name = "/xneeds",
@@ -2424,8 +2147,7 @@ function update(dt)
   beverageFeedbackCooldown = math.max(0, beverageFeedbackCooldown - dt)
 
   local sleeping = isSleeping()
-  local needsTimeScale = updateSleepFastForward(dt, sleeping)
-  local needsDt = dt * needsTimeScale
+  local needsDt = dt
 
   pollCombatDirtiness()
   trackHygieneActivity(needsDt)
@@ -2446,10 +2168,8 @@ function update(dt)
 end
 
 function uninit()
-  stopApplicationFastForward()
   status.clearPersistentEffects(consequenceCategory)
   if hudCanvas then
     hudCanvas:clear()
   end
-  fastForwardButtonRect = nil
 end
