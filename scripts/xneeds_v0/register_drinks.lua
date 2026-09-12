@@ -59,25 +59,35 @@ local foodParameter = type(foods.profileParameter) == "string"
   and foods.profileParameter
   or "needsFoodProfile"
 
+local function itemParameter(item, parameter)
+  local value = item[parameter]
+  if value == nil and type(item.parameters) == "table" then
+    value = item.parameters[parameter]
+  end
+  return value
+end
+
+local function isExplicitlyConfigured(value, itemProfiles, lowerName)
+  return type(value) == "string"
+    or value == false
+    or type(value) == "table"
+    or itemProfiles[lowerName] ~= nil
+end
+
 for index, assetPath in ipairs(assets.byExtension("consumable")) do
   local item = assets.json(assetPath)
   local category = type(item.category) == "string" and string.lower(item.category) or ""
   local itemName = type(item.itemName) == "string" and item.itemName or ""
   local lowerName = string.lower(itemName)
 
-  local explicitBeverage = item[beverageParameter]
+  local explicitBeverage = itemParameter(item, beverageParameter)
   local isDrink = category == drinkCategory
-    or type(explicitBeverage) == "string"
-    or explicitBeverage == false
-    or beverageProfiles[lowerName] ~= nil
+    or isExplicitlyConfigured(explicitBeverage, beverageProfiles, lowerName)
 
-  local explicitFood = item[foodParameter]
-  local isFood = foodsEnabled and (
-    category == foodCategory
-      or type(explicitFood) == "string"
-      or explicitFood == false
-      or foodProfiles[lowerName] ~= nil
-  )
+  local explicitFood = itemParameter(item, foodParameter)
+  local isFood = foodsEnabled
+    and (category == foodCategory
+      or isExplicitlyConfigured(explicitFood, foodProfiles, lowerName))
 
   if itemName ~= "" and (isDrink or isFood) then
     local suffix = string.format("%s_%s", safeName(itemName), index)

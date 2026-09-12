@@ -1363,6 +1363,27 @@ local function consumableSearchText(itemName, details)
   return " " .. string.lower(table.concat(parts, " ")) .. " "
 end
 
+local function normalizedInlineProfile(value)
+  if type(value) ~= "table"
+      or not isFiniteNumber(value.thirstRecovery)
+      or not isFiniteNumber(value.bladderGain)
+      or not isFiniteNumber(value.fatigueChange) then
+    return nil
+  end
+
+  local caffeine = value.caffeineDuration
+  if caffeine ~= nil and not isFiniteNumber(caffeine) then
+    return nil
+  end
+
+  return {
+    thirstRecovery = value.thirstRecovery,
+    bladderGain = value.bladderGain,
+    fatigueChange = value.fatigueChange,
+    caffeineDuration = caffeine or 0
+  }
+end
+
 local function profileFor(section, itemName, details)
   local explicit = details.parameters[section.profileParameter]
   if explicit == nil then
@@ -1375,6 +1396,11 @@ local function profileFor(section, itemName, details)
       "default forced by item parameter"
   elseif type(explicit) == "string" and section.profiles[explicit] then
     return explicit, section.profiles[explicit], "item parameter"
+  elseif type(explicit) == "table" then
+    local inline = normalizedInlineProfile(explicit)
+    if inline then
+      return "inline", inline, "item parameter (inline profile)"
+    end
   end
 
   local mapped = section.itemProfiles[string.lower(itemName)]
@@ -1684,7 +1710,7 @@ local function commandStatus()
   local consequences = currentConsequences()
   local hygieneState = hygieneEnvironment(needsConfig.updateInterval)
   return string.format(
-    "^#f3d36a;<Needs V1.9>^reset;\n"
+    "^#f3d36a;<Needs V1.10>^reset;\n"
       .. "Thirst: ^cyan;%.1f^reset; [%s]\n"
       .. "Fatigue: ^cyan;%.1f^reset; [%s]\n"
       .. "Bladder: ^cyan;%.1f^reset; [%s]\n"

@@ -3,6 +3,20 @@
 All notable changes to Needs are documented here. Versions follow Semantic
 Versioning while the mod remains in active development.
 
+## [1.10.0] - 2026-09-11
+
+### Added
+
+- Inline profiles: `needsBeverageProfile` and `needsFoodProfile` may now be a
+  table with `thirstRecovery`, `bladderGain`, `fatigueChange`, and optional
+  `caffeineDuration`, letting a mod define a custom profile on its own item
+  without editing the Needs config.
+- Top-level or `parameters` placement, and table-form profile parameters, are
+  now honoured during consumable registration, so non-standard-category items
+  can opt in from their own assets.
+- Developer integration guide in `docs/V1_DEVELOPMENT.md` covering automatic
+  detection, per-item parameters, object parameters, and config patching.
+
 ## [1.9.0] - 2026-09-11
 
 ### Added

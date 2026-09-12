@@ -389,6 +389,77 @@ scripts are not edited.
 FrackinInterface and FU may continue to own teambar.config and its textures
 because Needs reads the effective geometry without patching it.
 
+## Integrating other mods
+
+Needs is written so another mod can add drinks, foods, and fixtures from its own
+assets without editing Needs. There are four levels, from least to most work.
+
+### Automatic detection
+
+Every consumable whose final merged category is `drink` or `food` is registered
+when all assets load, and classified from its item name, short description,
+description, and effect names. Most mod items need no special handling. The
+category names come from `bladder.drinkCategory` and `foods.category` in
+`/xneeds_v0.config`.
+
+### Per-item parameters (recommended)
+
+A consumable can steer its own resolution by adding any of these namespaced keys,
+either at the top level of the asset or inside its `parameters` object. They are
+safe to ship even when Needs is not installed, because the engine ignores unknown
+fields.
+
+| Key | Type | Meaning |
+| --- | --- | --- |
+| `needsBeverageProfile` | `string` / `table` / `false` | Drinks: named profile, inline profile, or `false` to force the default. |
+| `needsFoodProfile` | `string` / `table` / `false` | Foods: same, using the `foods` profiles. |
+| `needsThirstValue` | `number` / `false` | Signed Thirst change (positive hydrates). `false` disables the thirst component. |
+| `needsBladderValue` | `number` / `false` | Signed Bladder change. `false` disables it. |
+| `needsFatigueChange` | `number` / `false` | Signed Fatigue change. `false` disables it. |
+| `needsCaffeineDuration` | `number` / `false` | Caffeine seconds. `false` disables it. |
+
+A string must name a profile in the corresponding section (`beverages.profiles`
+or `foods.profiles`). A table is used as an inline profile and must supply
+`thirstRecovery`, `bladderGain`, `fatigueChange`, and optionally
+`caffeineDuration`:
+
+```json
+{
+  "itemName": "myenergydrink",
+  "category": "drink",
+  "needsBeverageProfile": {
+    "thirstRecovery": 20,
+    "bladderGain": 18,
+    "fatigueChange": -10,
+    "caffeineDuration": 240
+  }
+}
+```
+
+For a consumable outside the `drink` and `food` categories, set the profile key
+at the top level to opt it in; this is also how a mod registers a non-standard
+category item with Needs.
+
+### Object parameters
+
+Loungeable fixtures can define `needsBladderReliefRate` (toilets) and
+`needsHygieneRecoveryRate` (showers/baths) to override or disable Needs'
+default recognition, including `false` to opt out.
+
+### Patching the Needs config (advanced)
+
+A mod may also patch `/xneeds_v0.config` to add named profiles, item mappings, or
+classification rules shared by many items. This relies on asset load order and
+should be a last resort; per-item parameters are more robust.
+
+Existing exact mappings used for misclassified items are listed under
+`beverages.itemProfiles` and `foods.itemProfiles`; a mod author can read those as
+examples.
+
+The `/xneeds beverages details` and `/xneeds foods details` audits report each
+item's profile, resolution source, asset path, and source mod, which is the
+fastest way to confirm how a given item is treated.
+
 Object and item extension parameters are optional and uniquely prefixed. V1 adds
 no new furniture, consumables, effect-status icons, menus, sounds, or
 animations. The four Needs meter icons are HUD-only uses of existing vanilla

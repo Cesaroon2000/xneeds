@@ -8,5 +8,5 @@
     "postLoad" : ["/scripts/xneeds_v0/register_drinks.lua"]
   },
   "tags" : "Mechanics",
-  "version" : "1.9.0"
+  "version" : "1.10.0"
 }

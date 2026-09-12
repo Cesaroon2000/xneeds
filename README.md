@@ -4,7 +4,7 @@ Needs is an xStarbound survival-simulation mod that adds Thirst, Fatigue,
 Bladder, and Hygiene to the player without replacing the vanilla or Frackin'
 Universe HUD.
 
-Current version: **1.9.0**
+Current version: **1.10.0**
 
 ![Needs HUD preview](_previewimage.png)
 
@@ -152,8 +152,14 @@ game-clock acceleration caused. Leaving the bed stops the recovery.
   intact.
 - FU files, FrackinInterface files, and vanilla interface files are not
   overwritten.
-- Exact exceptions can be added through `beverages.itemProfiles` when a modded
-  drink cannot be classified reliably.
+- Exact exceptions can be added through `beverages.itemProfiles` and
+  `foods.itemProfiles` when a modded item cannot be classified reliably.
+- Other mods can integrate from their own assets: consumables in the `drink` or
+  `food` category are detected automatically, and any item can set
+  `needsBeverageProfile` / `needsFoodProfile` (named or inline) plus
+  `needsThirstValue`, `needsBladderValue`, `needsFatigueChange`, and
+  `needsCaffeineDuration`. See the integrating section in
+  [`docs/V1_DEVELOPMENT.md`](docs/V1_DEVELOPMENT.md).
 
 ## Safe removal
 
