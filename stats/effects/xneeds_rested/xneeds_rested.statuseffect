@@ -1,0 +1,6 @@
+{
+  "name" : "xneeds_rested",
+  "effectConfig" : {},
+  "defaultDuration" : 300,
+  "scripts" : [ "xneeds_rested.lua" ]
+}

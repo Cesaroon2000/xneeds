@@ -1,4 +1,4 @@
-# Needs V1.7.0 development notes
+# Needs V1.8.0 development notes
 
 ## Architecture and persistence
 
@@ -205,6 +205,40 @@ leaving the bed, and hang on Save & Quit. The mod now never touches the game
 clock, sends no chat commands, and adds no world-server or universe callbacks,
 so sleeping is safe to interrupt and Save & Quit is unaffected.
 
+## Circadian rhythm and environment
+
+Fatigue gain while awake is multiplied by several independent factors that are
+combined multiplicatively with the caffeine factor:
+
+- Sleeping recovery is unaffected; these only apply while awake.
+- `fatigue.circadian` uses `world.timeOfDay()` (0.0 to 1.0) and the configurable
+  `nightStart` / `nightEnd` window to choose `nightGainMultiplier` or
+  `dayGainMultiplier`. The window wraps when `nightStart` is greater than
+  `nightEnd`. A missing or unavailable time query falls back to the day value.
+- `fatigue.rested` tracks how long the player has been sleeping. On waking from
+  at least `minimumSleepSeconds`, it applies the invisible `xneeds_rested`
+  status effect for `durationSeconds`, which sets `gainMultiplier` (below 1)
+  while active. An optional message is shown once.
+- `thirst.environment` and `fatigue.environment` mirror the Hygiene environment
+  maps. `biomeGainMultipliers` key on `world.biomeAt`, and
+  `environmentEffectGainMultipliers` key on `world.environmentStatusEffects`
+  names. Both default to 1 and the larger of the two is used.
+
+Biome matching is exact-name first, then an ordered pattern fallback. Each
+`biomeGainMultiplierPatterns` (or `biomeDecayMultiplierPatterns` for Hygiene)
+entry supplies a `multiplier` and a list of case-insensitive, plain-text
+`patterns`; the first pattern contained in the lowercased biome name wins. This
+lets modded variants inherit a base multiplier without listing every world, for
+example `aliendesert` and `desertoasis` match `desert`, and
+`arcticoceanfloor` matches `arctic`. Exact `biomeGainMultipliers` keys always
+take precedence, and any biome matching neither an exact key nor a pattern
+stays at 1.0, so a new or unsupported biome is neutral rather than an error.
+
+Environment multipliers scale passive Thirst gain and awake Fatigue gain; they
+do not affect sleeping recovery, beverage values, or penalties. The `/xneeds
+get` result reports `night`, `circadianMultiplier`, `rested`,
+`thirstEnvironmentMultiplier`, and `fatigueEnvironmentMultiplier`.
+
 ## HUD
 
 The HUD uses xStarbound's named full-window canvas API. The engine-controlled
@@ -305,8 +339,9 @@ The original message interface remains available through xStarbound /exec:
 
 The get result includes sleeping, caffeinated, caffeineRemainingSeconds,
 caffeineRemaining, bladderReliefRate, hygieneRecoveryRate, restRecoveryPerSecond,
-hygieneEnvironment, lastHygieneEnvironment, pendingCombatDirtiness,
-penaltyLevel, consequenceLevels, and
+night, circadianMultiplier, rested, thirstEnvironmentMultiplier,
+fatigueEnvironmentMultiplier, hygieneEnvironment, lastHygieneEnvironment,
+pendingCombatDirtiness, penaltyLevel, consequenceLevels, and
 consequenceMultipliers. The command output
 also reports the current biome multiplier, liquid classification, rain/wet
 state, and projected next-tick Hygiene breakdown. Debug handlers reject
@@ -346,8 +381,12 @@ Sleep and time:
 1. Sleep in a bed and confirm no button appears and the game remains at normal
    speed (`/timescale` reads `1.000000` throughout).
 2. Confirm sleeping restores Fatigue from 100 to 0 in roughly three minutes.
-3. Get out of the bed and confirm movement and world interaction still work.
-4. Confirm a caffeine drink counts down from `5:00` at 1x wall-clock while
+3. Sleep for more than the rested minimum, wake, and confirm the Rested message
+   appears and `/xneeds get` reports `rested: true`.
+4. Wait for night and confirm `/xneeds get` reports `night: true` and a
+   `circadianMultiplier` above 1.
+5. Get out of the bed and confirm movement and world interaction still work.
+6. Confirm a caffeine drink counts down from `5:00` at 1x wall-clock while
    `/xneeds get` reports `Caffeinated: yes (m:ss remaining)`.
 
 Recovery and environment:
@@ -356,6 +395,9 @@ Recovery and environment:
 2. Stand in clean water and in an active shower/bath and confirm Hygiene rises
    and the hover tooltip names the recovery source.
 3. Take damage and run/jump and confirm Dirtiness rises without unbounded spikes.
+4. Visit a hot and a cold biome and confirm `/xneeds get` reports the expected
+   `thirstEnvironmentMultiplier` / `fatigueEnvironmentMultiplier` values and the
+   matching hover tooltip lines.
 
 Beverages and HUD:
 

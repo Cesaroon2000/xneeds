@@ -3,6 +3,25 @@
 All notable changes to Needs are documented here. Versions follow Semantic
 Versioning while the mod remains in active development.
 
+## [1.8.0] - 2026-09-11
+
+### Added
+
+- Day/night Fatigue: awake Fatigue gain increases at night through
+  `fatigue.circadian`, with configurable night and day multipliers.
+- Temporary Rested bonus: sleeping for at least the configured minimum applies
+  an invisible `xneeds_rested` effect that reduces awake Fatigue gain for its
+  duration.
+- Environment-driven Thirst and Fatigue: biome and environment-effect gain
+  multipliers under `thirst.environment` and `fatigue.environment`, matching the
+  existing Hygiene environment system.
+- Ordered biome pattern fallback for Thirst, Fatigue, and Hygiene, so modded
+  biome variants inherit a base multiplier (`aliendesert` matches `desert`).
+  Exact keys take precedence and unmatched biomes stay neutral at 1.0.
+- `/xneeds get` now reports night/day, Rested state, and the current thirst and
+  fatigue environment multipliers. The Fatigue and Thirst hover tooltips show
+  the active circadian/rested/environment state.
+
 ## [1.7.0] - 2026-09-11
 
 ### Added

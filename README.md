@@ -4,7 +4,7 @@ Needs is an xStarbound survival-simulation mod that adds Thirst, Fatigue,
 Bladder, and Hygiene to the player without replacing the vanilla or Frackin'
 Universe HUD.
 
-Current version: **1.7.0**
+Current version: **1.8.0**
 
 ![Needs HUD preview](_previewimage.png)
 
@@ -38,7 +38,10 @@ supported.
 - Toilet relief and Hygiene recovery from baths, showers, clean liquids, and
   rain.
 - Hygiene loss from activity, combat, dirty liquids, and harsh environments.
-- Normal sleeping fully restores Fatigue in about three minutes.
+- Normal sleeping fully restores Fatigue in about three minutes, and a
+  qualifying sleep grants a temporary Rested bonus.
+- Day/night Fatigue: staying awake at night adds Fatigue faster.
+- Environment-driven Thirst and Fatigue from hot, cold, toxic, and other biomes.
 - Local testing and beverage-diagnostic commands.
 
 ## Installation
@@ -70,6 +73,11 @@ Important sections include:
 - `hygiene.environment` and `hygiene.combat`: environmental Dirtiness.
 - `sleep.bedEffects` and `fatigue.sleepRecoveryPerSecond`: sleep detection and
   rest recovery.
+- `fatigue.circadian` and `fatigue.rested`: day/night Fatigue and the temporary
+  Rested bonus.
+- `thirst.environment` and `fatigue.environment`: biome and environment effect
+  gain multipliers, with exact keys plus pattern fallback for modded biome
+  variants.
 - `hud`: visibility, spacing, colors, native icon paths, and the optional
   hover tooltips.
 - `debug`: local testing controls and logging.

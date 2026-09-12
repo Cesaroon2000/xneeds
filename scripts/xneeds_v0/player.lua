@@ -18,6 +18,8 @@ local pendingJumpingSeconds = 0
 local lastHygieneEnvironment = {}
 local beverageFeedbackCooldown = 0
 local caffeineRemainingSeconds = 0
+local sleepAccumulatedSeconds = 0
+local wasSleeping = false
 local hudBarRects = {}
 
 local needNames = {
@@ -105,6 +107,20 @@ local function requirePositiveNumberMap(value, path)
   end
 end
 
+local function requireBiomePatternRules(value, path)
+  if type(value) ~= "table" then
+    error(string.format("[xneeds_v0] %s must be a list", path))
+  end
+  for index, rule in ipairs(value) do
+    local rulePath = string.format("%s[%s]", path, index)
+    if type(rule) ~= "table" then
+      error(string.format("[xneeds_v0] %s must be an object", rulePath))
+    end
+    requirePositiveNumber(rule.multiplier, rulePath .. ".multiplier")
+    requireStringList(rule.patterns, rulePath .. ".patterns")
+  end
+end
+
 local function requireColor(value, path)
   if type(value) ~= "table" or #value ~= 4 then
     error(string.format("[xneeds_v0] %s must be an RGBA color", path))
@@ -166,6 +182,49 @@ local function loadConfig()
   requireNonnegativeNumber(config.thirst.passiveGainPerSecond, "thirst.passiveGainPerSecond")
   requireNonnegativeNumber(config.fatigue.awakeGainPerSecond, "fatigue.awakeGainPerSecond")
   requireNonnegativeNumber(config.fatigue.sleepRecoveryPerSecond, "fatigue.sleepRecoveryPerSecond")
+
+  for _, needName in ipairs({"thirst", "fatigue"}) do
+    local needEnvironment = config[needName].environment
+    if type(needEnvironment) ~= "table" then
+      error(string.format("[xneeds_v0] %s.environment configuration is missing", needName))
+    end
+    requirePositiveNumberMap(
+      needEnvironment.biomeGainMultipliers,
+      needName .. ".environment.biomeGainMultipliers"
+    )
+    requireBiomePatternRules(
+      needEnvironment.biomeGainMultiplierPatterns,
+      needName .. ".environment.biomeGainMultiplierPatterns"
+    )
+    requirePositiveNumberMap(
+      needEnvironment.environmentEffectGainMultipliers,
+      needName .. ".environment.environmentEffectGainMultipliers"
+    )
+  end
+
+  local circadian = config.fatigue.circadian
+  if type(circadian) ~= "table" or type(circadian.enabled) ~= "boolean" then
+    error("[xneeds_v0] fatigue.circadian configuration is invalid")
+  end
+  for _, key in ipairs({"nightStart", "nightEnd"}) do
+    requireNumber(circadian[key], "fatigue.circadian." .. key)
+    if circadian[key] < 0 or circadian[key] > 1 then
+      error("[xneeds_v0] fatigue.circadian." .. key .. " must be between 0 and 1")
+    end
+  end
+  requirePositiveNumber(circadian.nightGainMultiplier, "fatigue.circadian.nightGainMultiplier")
+  requirePositiveNumber(circadian.dayGainMultiplier, "fatigue.circadian.dayGainMultiplier")
+
+  local rested = config.fatigue.rested
+  if type(rested) ~= "table" or type(rested.enabled) ~= "boolean"
+      or type(rested.effect) ~= "string" or rested.effect == ""
+      or type(rested.message) ~= "string" then
+    error("[xneeds_v0] fatigue.rested configuration is invalid")
+  end
+  requirePositiveNumber(rested.gainMultiplier, "fatigue.rested.gainMultiplier")
+  requirePositiveNumber(rested.durationSeconds, "fatigue.rested.durationSeconds")
+  requireNonnegativeNumber(rested.minimumSleepSeconds, "fatigue.rested.minimumSleepSeconds")
+
   requireNonnegativeNumber(config.bladder.passiveGainPerSecond, "bladder.passiveGainPerSecond")
   requireNonnegativeNumber(config.bladder.reliefRatePerSecond, "bladder.reliefRatePerSecond")
   requireNonnegativeNumber(config.hygiene.decayPerSecond, "hygiene.decayPerSecond")
@@ -201,6 +260,10 @@ local function loadConfig()
   requireStringList(environment.dirtyLiquidStatusEffects, "hygiene.environment.dirtyLiquidStatusEffects")
   requireStringList(environment.rainStatusEffects, "hygiene.environment.rainStatusEffects")
   requirePositiveNumberMap(environment.biomeDecayMultipliers, "hygiene.environment.biomeDecayMultipliers")
+  requireBiomePatternRules(
+    environment.biomeDecayMultiplierPatterns,
+    "hygiene.environment.biomeDecayMultiplierPatterns"
+  )
   requirePositiveNumberMap(
     environment.environmentEffectDecayMultipliers,
     "hygiene.environment.environmentEffectDecayMultipliers"
@@ -729,8 +792,33 @@ local function currentBiome()
   end
 end
 
+local function configuredBiomeMultiplier(biomeName, multipliers, patterns)
+  local exact = type(multipliers) == "table" and multipliers[biomeName] or nil
+  if isFiniteNumber(exact) then
+    return exact
+  end
+
+  if type(patterns) == "table" then
+    for _, rule in ipairs(patterns) do
+      if type(rule) == "table" and isFiniteNumber(rule.multiplier) then
+        for _, pattern in ipairs(rule.patterns) do
+          if string.find(biomeName, string.lower(pattern), 1, true) then
+            return rule.multiplier
+          end
+        end
+      end
+    end
+  end
+  return 1
+end
+
 local function environmentDecayMultiplier(biomeName)
-  local multiplier = needsConfig.hygiene.environment.biomeDecayMultipliers[biomeName] or 1
+  local environment = needsConfig.hygiene.environment
+  local multiplier = configuredBiomeMultiplier(
+    biomeName,
+    environment.biomeDecayMultipliers,
+    environment.biomeDecayMultiplierPatterns
+  )
   local ok, environmentEffects = pcall(world.environmentStatusEffects, mcontroller.position())
   if ok and type(environmentEffects) == "table" then
     for _, effectName in ipairs(environmentEffects) do
@@ -1018,22 +1106,122 @@ local function onCaffeineUpdate(_, _, remaining)
   caffeineRemainingSeconds = remaining
 end
 
+local function needEnvironmentMultiplier(needName, biomeName)
+  local needConfig = needsConfig[needName]
+  local environment = type(needConfig) == "table" and needConfig.environment or nil
+  if type(environment) ~= "table" then
+    return 1
+  end
+
+  local multiplier = configuredBiomeMultiplier(
+    biomeName,
+    environment.biomeGainMultipliers,
+    environment.biomeGainMultiplierPatterns
+  )
+  local ok, environmentEffects = pcall(world.environmentStatusEffects, mcontroller.position())
+  if ok and type(environmentEffects) == "table" then
+    for _, effectName in ipairs(environmentEffects) do
+      if type(effectName) == "string" then
+        multiplier = math.max(
+          multiplier,
+          environment.environmentEffectGainMultipliers[string.lower(effectName)] or 1
+        )
+      end
+    end
+  end
+  return multiplier
+end
+
+local function isNightTime()
+  local circadian = needsConfig.fatigue.circadian
+  if not circadian.enabled then
+    return false
+  end
+
+  local ok, timeOfDay = pcall(world.timeOfDay)
+  if not ok or not isFiniteNumber(timeOfDay) then
+    return false
+  end
+
+  if circadian.nightStart <= circadian.nightEnd then
+    return timeOfDay >= circadian.nightStart and timeOfDay < circadian.nightEnd
+  end
+  return timeOfDay >= circadian.nightStart or timeOfDay < circadian.nightEnd
+end
+
+local function circadianGainMultiplier()
+  local circadian = needsConfig.fatigue.circadian
+  if not circadian.enabled then
+    return 1
+  end
+  if isNightTime() then
+    return circadian.nightGainMultiplier
+  end
+  return circadian.dayGainMultiplier
+end
+
+local function restedActive()
+  local rested = needsConfig.fatigue.rested
+  if not rested.enabled then
+    return false
+  end
+  local ok, active = pcall(status.uniqueStatusEffectActive, rested.effect)
+  return ok and active == true
+end
+
+local function restedGainMultiplier()
+  if restedActive() then
+    return needsConfig.fatigue.rested.gainMultiplier
+  end
+  return 1
+end
+
+local function trackSleepRest(sleeping, dt)
+  if sleeping then
+    sleepAccumulatedSeconds = sleepAccumulatedSeconds + dt
+    wasSleeping = true
+    return
+  end
+
+  if wasSleeping then
+    wasSleeping = false
+    local rested = needsConfig.fatigue.rested
+    if rested.enabled and sleepAccumulatedSeconds >= rested.minimumSleepSeconds then
+      status.addEphemeralEffect(rested.effect, rested.durationSeconds, entity.id())
+      if rested.message ~= "" then
+        player.queueStatusMessage(rested.message)
+      end
+    end
+    sleepAccumulatedSeconds = 0
+  end
+end
+
 local function advanceNeeds(elapsed)
   normalizeStorage()
+
+  local biomeName = currentBiome() or "none"
 
   if isSleeping() then
     storage.needs.fatigue = storage.needs.fatigue
       - needsConfig.fatigue.sleepRecoveryPerSecond * elapsed
   else
-    local fatigueGainMultiplier = caffeineActive()
-      and needsConfig.beverages.caffeineAwakeGainMultiplier
-      or 1
+    local fatigueGainMultiplier = 1
+    if caffeineActive() then
+      fatigueGainMultiplier = fatigueGainMultiplier
+        * needsConfig.beverages.caffeineAwakeGainMultiplier
+    end
+    fatigueGainMultiplier = fatigueGainMultiplier
+      * circadianGainMultiplier()
+      * restedGainMultiplier()
+      * needEnvironmentMultiplier("fatigue", biomeName)
     storage.needs.fatigue = storage.needs.fatigue
       + needsConfig.fatigue.awakeGainPerSecond * fatigueGainMultiplier * elapsed
   end
 
   storage.needs.thirst = storage.needs.thirst
-    + needsConfig.thirst.passiveGainPerSecond * elapsed
+    + needsConfig.thirst.passiveGainPerSecond
+    * needEnvironmentMultiplier("thirst", biomeName)
+    * elapsed
 
   local reliefRate = bladderReliefRate()
   if reliefRate > 0 then
@@ -1350,6 +1538,12 @@ local function debugGet(_, isLocal)
   result.lastHygieneEnvironment = lastHygieneEnvironment
   result.pendingCombatDirtiness = pendingCombatDirtiness
   result.restRecoveryPerSecond = needsConfig.fatigue.sleepRecoveryPerSecond
+  local biomeName = currentBiome() or "none"
+  result.night = isNightTime()
+  result.circadianMultiplier = circadianGainMultiplier()
+  result.rested = restedActive()
+  result.thirstEnvironmentMultiplier = needEnvironmentMultiplier("thirst", biomeName)
+  result.fatigueEnvironmentMultiplier = needEnvironmentMultiplier("fatigue", biomeName)
   local consequences = currentConsequences()
   result.penaltyLevel = highestConsequenceLevel()
   result.consequenceLevels = consequences.levels
@@ -1419,14 +1613,15 @@ local function commandStatus()
   local consequences = currentConsequences()
   local hygieneState = hygieneEnvironment(needsConfig.updateInterval)
   return string.format(
-    "^#f3d36a;<Needs V1.7>^reset;\n"
+    "^#f3d36a;<Needs V1.8>^reset;\n"
       .. "Thirst: ^cyan;%.1f^reset; [%s]\n"
       .. "Fatigue: ^cyan;%.1f^reset; [%s]\n"
       .. "Bladder: ^cyan;%.1f^reset; [%s]\n"
       .. "Hygiene: ^cyan;%.1f^reset; (dirtiness %.1f) [%s]\n"
       .. "Caffeinated: %s\n"
+      .. "Circadian: %s, rested %s\n"
       .. "Multipliers: speed %.0f%%, jump %.0f%%, power %.0f%%, energy regen %.0f%%, protection %.0f%%\n"
-      .. "Environment: biome %s x%.2f, liquid %s (%s), rain/wet %s\n"
+      .. "Environment: biome %s x%.2f, thirst gain x%.2f, fatigue gain x%.2f, liquid %s (%s), rain/wet %s\n"
       .. "Hygiene next tick: recovery +%.2f, passive -%.3f, activity -%.3f, liquid -%.3f, combat -%.3f",
     storage.needs.thirst,
     tierLabel(consequences.levels.thirst),
@@ -1440,6 +1635,8 @@ local function commandStatus()
     caffeineActive()
       and ("yes (" .. formatDuration(caffeineRemaining()) .. " remaining)")
       or "no",
+    isNightTime() and "night" or "day",
+    restedActive() and "yes" or "no",
     consequences.speed * 100,
     consequences.jump * 100,
     consequences.power * 100,
@@ -1447,6 +1644,8 @@ local function commandStatus()
     consequences.protection * 100,
     hygieneState.biome,
     hygieneState.biomeMultiplier,
+    needEnvironmentMultiplier("thirst", hygieneState.biome),
+    needEnvironmentMultiplier("fatigue", hygieneState.biome),
     hygieneState.liquid,
     hygieneState.liquidClass,
     hygieneState.rainEffect and "yes" or "no",
@@ -1827,6 +2026,21 @@ local function needRecoveryState(needName, sleeping)
       end
       return "Caffeine: " .. remaining .. " left"
     end
+    if restedActive() then
+      return "Rested: reduced fatigue gain"
+    end
+    local biomeName = currentBiome() or "none"
+    if isNightTime() then
+      return "Night: faster fatigue gain"
+    end
+    if needEnvironmentMultiplier("fatigue", biomeName) > 1 then
+      return "Environment: faster fatigue"
+    end
+  elseif needName == "thirst" then
+    local biomeName = currentBiome() or "none"
+    if needEnvironmentMultiplier("thirst", biomeName) > 1 then
+      return "Environment: faster thirst"
+    end
   elseif needName == "bladder" then
     if bladderReliefRate() > 0 then
       return "Relief: toilet"
@@ -2148,6 +2362,8 @@ function update(dt)
 
   local sleeping = isSleeping()
   local needsDt = dt
+
+  trackSleepRest(sleeping, dt)
 
   pollCombatDirtiness()
   trackHygieneActivity(needsDt)
