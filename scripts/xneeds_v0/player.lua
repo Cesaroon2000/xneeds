@@ -1685,6 +1685,7 @@ local function commandHelp(errorText)
     .. "^cyan;/xneeds set <thirst|fatigue|bladder|hygiene|dirtiness|all> <0-100>^reset;\n"
     .. "^cyan;/xneeds add <need> <amount>^reset;\n"
     .. "^cyan;/xneeds beverage <itemName>^reset;\n"
+    .. "^cyan;/xneeds beverages [all|details|<profile>|<text>]^reset;\n"
     .. "^cyan;/xneeds preset <normal|noticeable|serious|urgent|critical>^reset;\n"
     .. "^cyan;/xneeds reset^reset;"
 end
@@ -1737,6 +1738,171 @@ local function beverageDiagnosticLine(label, value, source, invert)
   return string.format("%s: %+g [%s]", label, value, source or "unknown")
 end
 
+local drinkAuditCache
+
+local function detectedDrinkItems()
+  if drinkAuditCache then
+    return drinkAuditCache
+  end
+
+  local items = {}
+  local seen = {}
+  local beverages = needsConfig.beverages
+  local ok, assetPaths = pcall(root.assetsByExtension, "consumable")
+  if ok and type(assetPaths) == "table" then
+    for _, assetPath in ipairs(assetPaths) do
+      local assetOk, item = pcall(root.assetJson, assetPath)
+      if assetOk and type(item) == "table" then
+        local itemName = type(item.itemName) == "string" and item.itemName or ""
+        local category = type(item.category) == "string"
+          and string.lower(item.category) or ""
+        local explicitProfile = item[beverages.profileParameter]
+        local explicitlyConfigured = beverages.itemProfiles[string.lower(itemName)] ~= nil
+          or type(explicitProfile) == "string"
+          or explicitProfile == false
+        if itemName ~= "" and not seen[itemName]
+            and (category == "drink" or explicitlyConfigured) then
+          seen[itemName] = true
+          table.insert(items, {
+            name = itemName,
+            path = assetPath
+          })
+        end
+      end
+    end
+  end
+
+  table.sort(items, function(a, b)
+    return a.name < b.name
+  end)
+  drinkAuditCache = items
+  return items
+end
+
+local function beverageAuditText(details)
+  local parts = {}
+  local function addText(value)
+    if type(value) == "string" and value ~= "" then
+      table.insert(parts, value)
+    end
+  end
+
+  addText(details.parameters.shortdescription)
+  addText(details.config.shortdescription)
+  addText(details.parameters.description)
+  addText(details.config.description)
+
+  local effects = {}
+  appendBeverageEffectNames(effects, details.parameters.effects)
+  appendBeverageEffectNames(effects, details.config.effects)
+  if #effects > 0 then
+    table.insert(parts, "effects: " .. table.concat(effects, ", "))
+  end
+
+  local text = table.concat(parts, " | ")
+  text = string.gsub(text, "%s+", " ")
+  if #text > 160 then
+    text = string.sub(text, 1, 157) .. "..."
+  end
+  return text
+end
+
+local function beverageAudit(arguments)
+  local items = detectedDrinkItems()
+  if #items == 0 then
+    return "Beverage audit: no detected drinks."
+  end
+
+  local showDetails = arguments[2] == "details"
+  local filter = showDetails and nil or arguments[2]
+  local profileFilter
+  local nameFilter
+  if filter and filter ~= "all" then
+    if needsConfig.beverages.profiles[filter] then
+      profileFilter = filter
+    else
+      nameFilter = filter
+    end
+  end
+
+  local counts = {}
+  local matches = {}
+  for _, record in ipairs(items) do
+    local itemName = record.name
+    local details = itemDetails(itemName)
+    if details then
+      local profileName, _, source = beverageProfile(itemName, details)
+      counts[profileName] = (counts[profileName] or 0) + 1
+
+      local include
+      if profileFilter then
+        include = profileName == profileFilter
+      elseif nameFilter then
+        include = string.find(string.lower(itemName), nameFilter, 1, true) ~= nil
+      else
+        include = source == "default"
+      end
+      if include then
+        local entry = string.format(
+          "%s -> %s [%s]",
+          itemName,
+          profileName,
+          source
+        )
+        if showDetails then
+          local sourceOk, sourcePath = pcall(root.assetSource, record.path)
+          entry = string.format(
+            "%s\n    path: %s\n    mod: %s\n    text: %s",
+            entry,
+            record.path,
+            sourceOk and sourcePath or "unknown",
+            beverageAuditText(details)
+          )
+        end
+        table.insert(matches, entry)
+      end
+    end
+  end
+
+  local profileSummary = {}
+  for profileName, count in pairs(counts) do
+    table.insert(profileSummary, string.format("%s %d", profileName, count))
+  end
+  table.sort(profileSummary)
+
+  local scope
+  if profileFilter then
+    scope = "profile " .. profileFilter
+  elseif nameFilter then
+    scope = "name matching " .. nameFilter
+  elseif showDetails then
+    scope = "default fallbacks with details"
+  else
+    scope = "default fallbacks"
+  end
+
+  local limit = showDetails and 12 or 40
+  local shown = math.min(#matches, limit)
+  local lines = {}
+  for index = 1, shown do
+    table.insert(lines, "  " .. matches[index])
+  end
+  if shown == 0 then
+    table.insert(lines, "  (none)")
+  elseif #matches > shown then
+    table.insert(lines, string.format("  ...and %d more", #matches - shown))
+  end
+
+  return string.format(
+    "Beverage audit: %d detected. Profiles: %s\n%s (%d):\n%s",
+    #items,
+    table.concat(profileSummary, ", "),
+    scope,
+    #matches,
+    table.concat(lines, "\n")
+  )
+end
+
 local function needsCommand(rawArguments)
   local arguments = {}
   for argument in string.gmatch(rawArguments or "", "%S+") do
@@ -1786,6 +1952,8 @@ local function needsCommand(rawArguments)
       beverageDiagnosticLine("Fatigue", fatigueChange, fatigueSource, false),
       beverageDiagnosticLine("Caffeine seconds", caffeineDuration, caffeineSource, false)
     )
+  elseif operation == "beverages" then
+    return beverageAudit(arguments)
   elseif operation == "help" then
     return commandHelp()
   elseif operation == "reset" then

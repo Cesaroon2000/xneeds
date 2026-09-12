@@ -27,8 +27,8 @@ supported.
 - Configurable thresholds, warnings, and nonlethal gameplay consequences.
 - Automatic detection of vanilla, FU, and Workshop beverages after all assets
   load.
-- Water, juice, milk, soda, caffeine, alcohol, salty, toxic, and standard drink
-  profiles.
+- Water, juice, milk, soda, caffeine, alcohol, salty, toxic, standard, and
+  solid-food profiles, with exact mappings for misclassified FU items.
 - Caffeine relief with remaining-time reporting, alcohol fatigue, dehydration,
   and bladder effects.
 - Toilet relief and Hygiene recovery from baths, showers, clean liquids, and
@@ -96,11 +96,23 @@ xStarbound safe scripts.
 /xneeds preset critical
 /xneeds beverage coffee
 /xneeds beverage <itemName>
+/xneeds beverages
+/xneeds beverages all
+/xneeds beverages details
+/xneeds beverages <profile>
 /xneeds reset
 ```
 
 The beverage command reports the selected profile, classification source,
 signed Needs changes, caffeine duration, and any item-specific overrides.
+
+The beverages audit lists every detected drink with its resolved profile and
+source. With no argument it lists only the items that fall back to the default
+profile, which are the best candidates for an exact `beverages.itemProfiles`
+exception. Pass `all`, a profile name, or a name fragment to change the listing.
+`details` adds each fallback's asset path, source mod, and the description and
+effect text the classifier sees, which makes it easy to identify unfamiliar
+items or patched asset sources.
 
 ## Sleep acceleration
 

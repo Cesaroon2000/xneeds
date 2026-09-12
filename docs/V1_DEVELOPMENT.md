@@ -73,6 +73,7 @@ Default profiles are deliberately conservative starting points:
 | Salty | +10 | +12 | 0 | — |
 | Toxic | +20 | +10 | +5 | — |
 | Standard | -25 | +15 | 0 | — |
+| Solid food | 0 | +5 | 0 | — |
 
 While the invisible `xneeds_caffeinated` effect is active, awake Fatigue gain
 uses the configured multiplier, zero by default. Coffee therefore gives an
@@ -266,6 +267,10 @@ The local xStarbound slash command is enabled by debug.commandsEnabled:
     /xneeds add bladder -20
     /xneeds beverage coffee
     /xneeds beverage bottledwater
+    /xneeds beverages
+    /xneeds beverages all
+    /xneeds beverages details
+    /xneeds beverages alcohol
     /xneeds preset normal
     /xneeds preset noticeable
     /xneeds preset serious
@@ -278,6 +283,21 @@ HUD fill. Setting all or applying a preset assigns the requested problem value
 to Thirst, Fatigue, Bladder, and Dirtiness. Values and additions are clamped to
 0 through 100. Commands are local to the current player and do not require
 safeScripts to be disabled.
+
+The `/xneeds beverages` audit enumerates the final loaded consumable assets with
+`root.assetsByExtension`, keeps the ones whose merged category is drink (or that
+opt in through the profile parameter or an exact item mapping), and resolves each
+through the same profile logic used at consumption time. With no argument it
+lists only items whose resolution source is the plain default, which are the
+candidates for a new `beverages.itemProfiles` exception. Passing `all`, a profile
+name, or a name fragment changes the listing; `details` additionally prints each
+fallback's asset path, source mod via `root.assetSource`, and the description and
+effect text used by classification. The result is cached per session, so later
+runs are instant. Known exceptions live in `beverages.itemProfiles`: Corvex
+Drink and Code Zerchesium resolve to soda, Beakeasy Moonshine to alcohol,
+Blood Chalice to standard, and Chewable Magnet plus the raw-meat foods whose
+mod category is `drink` (Jarred Fetus, Meat Smoothie, Orphan Paste) resolve to
+the `solid` profile so they give no hydration.
 
 The original message interface remains available through xStarbound /exec:
 

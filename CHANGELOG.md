@@ -14,6 +14,16 @@ Versioning while the mod remains in active development.
   colors. Disabled tooltips leave the existing meters unchanged.
 - Remaining caffeine time is reported by `/xneeds get` and shown in the Fatigue
   hover tooltip.
+- `/xneeds beverages` audit lists every detected drink with its resolved profile
+  and source, defaulting to the items that fall back to `standard`. Accepts
+  `all`, `details`, a profile name, or a name fragment. `details` also reports
+  the asset path, source mod, and the text the classifier sees.
+- A `solid` beverage profile for FU food items that are technically category
+  `drink` but give no hydration.
+- Exact item mappings for the previously unclassified Workshop drinks
+  `corvexdrink` and `codezerches` (soda), `anom_beakeasymoonshine` (alcohol),
+  `fubloodchalice` (standard), and `chewablemagnet`, `jarredfetus`,
+  `meatsmoothie`, and `orphanpaste` (solid).
 
 ### Changed
 
