@@ -1,12 +1,12 @@
 {
   "author" : "Cesaroon2000",
-  "description" : "Persistent Thirst, Fatigue, Bladder, and Hygiene needs with drink and food profiles, recovery interactions, penalties, warnings, an adaptive HUD with optional hover details, fast restful sleep, day/night fatigue, and environment-driven thirst and fatigue.",
+  "description" : "xNeeds adds four survival needs to Starbound without replacing the vanilla, FU, or FrackinInterface HUD: Thirst, Fatigue, Bladder, and Hygiene.\n\n- Four thin, scale-aware meters with native icons and hover details.\n- Configurable warnings and nonlethal penalties across speed, jump, power, energy regeneration, and protection.\n- Automatic drink and food profiles, including caffeine, alcohol, salty, toxic, and container returns.\n- Day/night and environment effects, restful sleep, toilets, baths, and showers.\n- In-game settings menu (/xneeds options) and help (/xneeds help).\n\nWorks with Frackin' Universe. No vanilla, FU, or FrackinInterface files are replaced. Requires xStarbound.",
   "friendlyName" : "xNeeds",
   "name" : "xneeds",
   "requires" : ["xSBassets"],
   "scripts" : {
     "postLoad" : ["/scripts/xneeds_v0/register_drinks.lua"]
   },
-  "tags" : "Mechanics",
+  "tags" : "Mechanics|Food and Farming|User Interface",
   "version" : "1.13.0"
 }
