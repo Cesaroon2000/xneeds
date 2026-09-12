@@ -1,4 +1,4 @@
-# Needs V1.9.0 development notes
+# Needs V1.11.0 development notes
 
 ## Architecture and persistence
 
@@ -305,6 +305,33 @@ and all other HUD behavior untouched. Hygiene recovery source selection is
 tracked while the environment is evaluated so the tooltip can report whether a
 clean liquid, bath/tub, shower/bath, or rain is actively cleaning the player.
 
+## In-game settings
+
+`/xneeds options` toggles a settings panel drawn on the same full-window canvas
+as the meters, so no interface file is replaced. The panel lists toggles for HUD
+meters, hover tooltips, compact bars, always-show values, threshold pulse, and
+each of the four need bars, plus a Close button.
+
+Settings live in `storage.xneedsSettings` and are normalized on read, so missing
+or wrong-typed fields fall back to the config defaults from `newHudSettings`.
+They persist with the character. `hudSettings()` returns the effective table and
+the drawing code reads it instead of `needsConfig.hud` for the toggled options;
+the config keeps supplying geometry, colors, fonts, and icon paths.
+
+Rendering details:
+
+- Compact bars draw at 40% of the derived width and skip icons; the tooltip and
+  always-show-value anchors follow the effective width.
+- Always-show values print `floor(value + 0.5)` beside each bar using the
+  tooltip text color.
+- The threshold pulse brightens a bar for `pulseDuration` seconds when
+  `refreshWarningLevels` detects an upward tier crossing.
+
+Input note: the overlay reads `input.mouseDown("MouseLeft")` and the canvas
+mouse position, so a click that toggles a row can also reach the world as a
+normal left-click. Open the panel when not aiming at anything important. The
+panel itself never replaces or blocks vanilla input.
+
 ## Debug commands
 
 The local xStarbound slash command is enabled by debug.commandsEnabled:
@@ -329,6 +356,7 @@ The local xStarbound slash command is enabled by debug.commandsEnabled:
     /xneeds foods all
     /xneeds foods details
     /xneeds foods juicy
+    /xneeds options
     /xneeds preset normal
     /xneeds preset noticeable
     /xneeds preset serious
@@ -514,6 +542,16 @@ Beverages, food, and HUD:
    rows are correct and do not overlap the status row.
 5. Change interface scale and window size and confirm the meters and tooltips
    stay aligned.
+
+Settings overlay:
+
+1. Run `/xneeds options` and confirm the panel opens centered with all toggles
+   reflecting current values.
+2. Toggle each option and confirm it applies immediately: meters hide, tooltips
+   stop, bars shorten without icons, values appear, and a threshold crossing
+   pulses.
+3. Save and quit, then reload, and confirm the settings persisted.
+4. Close with the button and with `/xneeds options`.
 
 Safe removal:
 

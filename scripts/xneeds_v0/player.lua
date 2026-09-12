@@ -21,6 +21,9 @@ local caffeineRemainingSeconds = 0
 local sleepAccumulatedSeconds = 0
 local wasSleeping = false
 local hudBarRects = {}
+local pulseTimers = {}
+local pulseDuration = 1.2
+local settingsOpen = false
 
 local needNames = {
   thirst = true,
@@ -577,6 +580,44 @@ local function needSnapshot()
   }
 end
 
+local function newHudSettings()
+  local tooltips = needsConfig.hud.tooltips
+  return {
+    enabled = needsConfig.hud.enabled ~= false,
+    tooltips = type(tooltips) == "table" and tooltips.enabled ~= false or false,
+    compact = false,
+    alwaysShowValues = false,
+    pulse = true,
+    showThirst = true,
+    showFatigue = true,
+    showBladder = true,
+    showHygiene = true
+  }
+end
+
+local function normalizeHudSettings(settings)
+  local defaults = newHudSettings()
+  if type(settings) ~= "table" then
+    settings = {}
+  end
+  for key, value in pairs(defaults) do
+    if type(settings[key]) ~= type(value) then
+      settings[key] = value
+    end
+  end
+  return settings
+end
+
+local function hudSettings()
+  storage.xneedsSettings = normalizeHudSettings(storage.xneedsSettings)
+  return storage.xneedsSettings
+end
+
+local function setHudSetting(key, value)
+  local settings = hudSettings()
+  settings[key] = value
+end
+
 local function safeCurrentEmoteIsSleep()
   if type(player.currentEmote) ~= "function" then
     return false
@@ -996,6 +1037,9 @@ local function refreshWarningLevels(notify)
       local messageText = type(messages) == "table" and messages[key] or nil
       if type(messageText) == "string" and messageText ~= "" then
         player.queueStatusMessage(messageText)
+      end
+      if hudSettings().pulse then
+        pulseTimers[needName] = pulseDuration
       end
     end
 
@@ -1710,7 +1754,7 @@ local function commandStatus()
   local consequences = currentConsequences()
   local hygieneState = hygieneEnvironment(needsConfig.updateInterval)
   return string.format(
-    "^#f3d36a;<Needs V1.10>^reset;\n"
+    "^#f3d36a;<Needs V1.11>^reset;\n"
       .. "Thirst: ^cyan;%.1f^reset; [%s]\n"
       .. "Fatigue: ^cyan;%.1f^reset; [%s]\n"
       .. "Bladder: ^cyan;%.1f^reset; [%s]\n"
@@ -1765,6 +1809,7 @@ local function commandHelp(errorText)
     .. "^cyan;/xneeds beverages [all|details|<profile>|<text>]^reset;\n"
     .. "^cyan;/xneeds food <itemName>^reset;\n"
     .. "^cyan;/xneeds foods [all|details|<profile>|<text>]^reset;\n"
+    .. "^cyan;/xneeds options^reset;\n"
     .. "^cyan;/xneeds preset <normal|noticeable|serious|urgent|critical>^reset;\n"
     .. "^cyan;/xneeds reset^reset;"
 end
@@ -2077,6 +2122,12 @@ local function needsCommand(rawArguments)
     return beverageAudit(arguments)
   elseif operation == "foods" then
     return foodAudit(arguments)
+  elseif operation == "options" then
+    settingsOpen = not settingsOpen
+    if settingsOpen then
+      return "Needs settings opened. Use the Close button or /xneeds options to close."
+    end
+    return "Needs settings closed."
   elseif operation == "help" then
     return commandHelp()
   elseif operation == "reset" then
@@ -2262,6 +2313,55 @@ local function needTooltipLines(needName, sleeping)
   return lines
 end
 
+local function hudBarWidth()
+  if not hudLayout then
+    return 0
+  end
+  if hudSettings().compact then
+    return math.max(12, math.floor(hudLayout.width * 0.4))
+  end
+  return hudLayout.width
+end
+
+local function hudIconSize()
+  if hudSettings().compact then
+    return 0
+  end
+  return needsConfig.hud.iconSize
+end
+
+local function hudTextColor()
+  local tooltips = needsConfig.hud.tooltips
+  if type(tooltips) == "table" and type(tooltips.textColor) == "table" then
+    return tooltips.textColor
+  end
+  return needsConfig.hud.borderColor
+end
+
+local function hudAccentColor()
+  local tooltips = needsConfig.hud.tooltips
+  if type(tooltips) == "table"
+      and type(tooltips.tierColors) == "table"
+      and type(tooltips.tierColors.noticeable) == "table" then
+    return tooltips.tierColors.noticeable
+  end
+  return needsConfig.hud.borderColor
+end
+
+local function pulseColor(color, remaining)
+  local fraction = math.max(0, math.min(1, remaining / pulseDuration))
+  if fraction <= 0 then
+    return color
+  end
+  local highlight = 0.6 * fraction
+  return {
+    math.floor(math.min(255, color[1] + (255 - color[1]) * highlight)),
+    math.floor(math.min(255, color[2] + (255 - color[2]) * highlight)),
+    math.floor(math.min(255, color[3] + (255 - color[3]) * highlight)),
+    color[4]
+  }
+end
+
 local function hoveredNeedName()
   if not hudCanvas then
     return nil
@@ -2282,9 +2382,9 @@ local function drawNeedTooltip(needName, sleeping, topY)
 
   local canvasSize = hudCanvas:size()
   local anchorX = hudLayout.x
-    + hudLayout.width
+    + hudBarWidth()
     + needsConfig.hud.iconGap
-    + needsConfig.hud.iconSize
+    + hudIconSize()
     + tooltips.gap
   if anchorX + width > canvasSize[1] - 2 then
     anchorX = math.max(2, hudLayout.x - tooltips.gap - width)
@@ -2356,8 +2456,9 @@ end
 
 local function drawNeedBar(needName, y, ratio, color, iconPath)
   local x = hudLayout.x
-  local width = hudLayout.width
+  local width = hudBarWidth()
   local height = needsConfig.hud.barHeight
+  local settings = hudSettings()
 
   hudCanvas:drawRect(
     {x, y, x + width, y + height},
@@ -2379,32 +2480,197 @@ local function drawNeedBar(needName, y, ratio, color, iconPath)
     if fillWidth > 0 then
       hudCanvas:drawRect(
         {innerLeft, innerBottom, innerLeft + fillWidth, innerTop},
-        color
+        pulseColor(color, pulseTimers[needName] or 0)
       )
     end
   end
 
-  local iconSize = needsConfig.hud.iconSize
-  local iconCenter = {
-    x + width + needsConfig.hud.iconGap + iconSize / 2,
-    y + height / 2
-  }
-  hudCanvas:drawImage(
-    iconPath,
-    iconCenter,
-    needsConfig.hud.iconScale,
-    {255, 255, 255, 255},
-    true
-  )
+  local iconSize = hudIconSize()
+  if iconSize > 0 then
+    hudCanvas:drawImage(
+      iconPath,
+      {
+        x + width + needsConfig.hud.iconGap + iconSize / 2,
+        y + height / 2
+      },
+      needsConfig.hud.iconScale,
+      {255, 255, 255, 255},
+      true
+    )
+  end
+
+  local trailing = iconSize > 0 and (needsConfig.hud.iconGap + iconSize) or 0
+  if settings.alwaysShowValues then
+    hudCanvas:drawText(
+      string.format("%d", math.floor(clampNeed(ratio) + 0.5)),
+      {
+        position = {x + width + trailing + 3, y + height / 2},
+        horizontalAnchor = "left",
+        verticalAnchor = "mid"
+      },
+      7,
+      hudTextColor()
+    )
+  end
 
   local step = height + needsConfig.hud.barGap
   local hoverPad = math.max(0, (step - height) / 2)
   hudBarRects[needName] = {
     x,
     y - hoverPad,
-    x + width + needsConfig.hud.iconGap + iconSize,
+    x + width + trailing,
     y + height + hoverPad
   }
+end
+
+local settingsRowDefs = {
+  { label = "HUD meters", key = "enabled" },
+  { label = "Hover tooltips", key = "tooltips" },
+  { label = "Compact bars", key = "compact" },
+  { label = "Always show values", key = "alwaysShowValues" },
+  { label = "Pulse on threshold", key = "pulse" },
+  { label = "Thirst bar", key = "showThirst" },
+  { label = "Fatigue bar", key = "showFatigue" },
+  { label = "Bladder bar", key = "showBladder" },
+  { label = "Hygiene bar", key = "showHygiene" }
+}
+
+local settingsRowRects = {}
+local settingsCloseRect
+
+local function settingsLayout()
+  local canvasSize = hudCanvas:size()
+  local width = 210
+  local rowHeight = 16
+  local padding = 12
+  local titleHeight = 22
+  local closeArea = 28
+  local height = titleHeight + #settingsRowDefs * rowHeight + closeArea + padding
+  local left = math.floor((canvasSize[1] - width) / 2)
+  local bottom = math.floor((canvasSize[2] - height) / 2)
+  return {left, bottom, left + width, bottom + height}, width, rowHeight, padding, titleHeight
+end
+
+local function drawSettingsOverlay()
+  local rect, width, rowHeight, padding, titleHeight = settingsLayout()
+  local left, bottom, right, top = rect[1], rect[2], rect[3], rect[4]
+  local canvasSize = hudCanvas:size()
+  local textColor = hudTextColor()
+
+  hudCanvas:drawRect({0, 0, canvasSize[1], canvasSize[2]}, {0, 0, 0, 150})
+  hudCanvas:drawRect(rect, needsConfig.hud.borderColor)
+  hudCanvas:drawRect(
+    {left + 1, bottom + 1, right - 1, top - 1},
+    needsConfig.hud.backgroundColor
+  )
+  hudCanvas:drawText(
+    "Needs Settings",
+    {
+      position = {left + width / 2, top - titleHeight / 2 - 2},
+      horizontalAnchor = "mid",
+      verticalAnchor = "mid"
+    },
+    9,
+    hudAccentColor()
+  )
+
+  local mouse = hudCanvas:mousePosition()
+  local settings = hudSettings()
+  local firstRowTop = top - titleHeight - 4
+  settingsRowRects = {}
+  for index, def in ipairs(settingsRowDefs) do
+    local rowTop = firstRowTop - (index - 1) * rowHeight
+    local rowRect = {left + padding, rowTop - rowHeight, right - padding, rowTop}
+    settingsRowRects[index] = rowRect
+
+    if pointInsideRect(mouse, rowRect) then
+      hudCanvas:drawRect(rowRect, {22, 51, 75, 200})
+    end
+
+    local boxSize = 10
+    local boxLeft = rowRect[1] + 2
+    local boxBottom = rowRect[2] + (rowHeight - boxSize) / 2
+    hudCanvas:drawRect(
+      {boxLeft, boxBottom, boxLeft + boxSize, boxBottom + boxSize},
+      needsConfig.hud.borderColor
+    )
+    if settings[def.key] then
+      hudCanvas:drawRect(
+        {boxLeft + 2, boxBottom + 2, boxLeft + boxSize - 2, boxBottom + boxSize - 2},
+        textColor
+      )
+    end
+
+    hudCanvas:drawText(
+      def.label,
+      {
+        position = {boxLeft + boxSize + 6, rowRect[2] + rowHeight / 2},
+        horizontalAnchor = "left",
+        verticalAnchor = "mid"
+      },
+      8,
+      textColor
+    )
+  end
+
+  local closeTop = bottom + padding + 16
+  settingsCloseRect = {
+    left + width / 2 - 30,
+    closeTop - 16,
+    left + width / 2 + 30,
+    closeTop
+  }
+  local closeHovered = pointInsideRect(mouse, settingsCloseRect)
+  hudCanvas:drawRect(settingsCloseRect, needsConfig.hud.borderColor)
+  hudCanvas:drawRect(
+    {
+      settingsCloseRect[1] + 1,
+      settingsCloseRect[2] + 1,
+      settingsCloseRect[3] - 1,
+      settingsCloseRect[4] - 1
+    },
+    closeHovered and hudAccentColor() or needsConfig.hud.backgroundColor
+  )
+  hudCanvas:drawText(
+    "Close",
+    {
+      position = {left + width / 2, settingsCloseRect[2] + 8},
+      horizontalAnchor = "mid",
+      verticalAnchor = "mid"
+    },
+    8,
+    textColor
+  )
+end
+
+local function handleSettingsClick()
+  if type(input) ~= "table" or type(input.mouseDown) ~= "function" then
+    return
+  end
+  local ok, clicks = pcall(input.mouseDown, "MouseLeft")
+  if not ok or type(clicks) ~= "table" or #clicks == 0 then
+    return
+  end
+  local positionOk, mouse = pcall(function()
+    return hudCanvas:mousePosition()
+  end)
+  if not positionOk then
+    return
+  end
+
+  if pointInsideRect(mouse, settingsCloseRect) then
+    settingsOpen = false
+    return
+  end
+
+  local settings = hudSettings()
+  for index, rowRect in ipairs(settingsRowRects) do
+    if pointInsideRect(mouse, rowRect) then
+      local def = settingsRowDefs[index]
+      settings[def.key] = not settings[def.key]
+      return
+    end
+  end
 end
 
 local function drawHud(sleeping)
@@ -2415,48 +2681,64 @@ local function drawHud(sleeping)
   hudCanvas:clear()
   hudBarRects = {}
 
-  local canvasSize = hudCanvas:size()
-  local height = needsConfig.hud.barHeight
-  local step = height + needsConfig.hud.barGap
-  local firstY = canvasSize[2] + hudLayout.topOffset - height
+  local settings = hudSettings()
 
-  if needsConfig.hud.enabled then
-    drawNeedBar(
-      "thirst",
-      firstY,
-      storage.needs.thirst,
-      needsConfig.hud.thirstColor,
-      needsConfig.hud.icons.thirst
-    )
-    drawNeedBar(
-      "fatigue",
-      firstY - step,
-      storage.needs.fatigue,
-      needsConfig.hud.fatigueColor,
-      needsConfig.hud.icons.fatigue
-    )
-    drawNeedBar(
-      "bladder",
-      firstY - step * 2,
-      storage.needs.bladder,
-      needsConfig.hud.bladderColor,
-      needsConfig.hud.icons.bladder
-    )
-    drawNeedBar(
-      "hygiene",
-      firstY - step * 3,
-      100 - storage.needs.hygiene,
-      needsConfig.hud.hygieneColor,
-      needsConfig.hud.icons.hygiene
-    )
+  if hudLayout and settings.enabled then
+    local canvasSize = hudCanvas:size()
+    local height = needsConfig.hud.barHeight
+    local step = height + needsConfig.hud.barGap
+    local firstY = canvasSize[2] + hudLayout.topOffset - height
+
+    local bars = {
+      {
+        name = "thirst",
+        show = settings.showThirst,
+        ratio = storage.needs.thirst,
+        color = needsConfig.hud.thirstColor,
+        icon = needsConfig.hud.icons.thirst
+      },
+      {
+        name = "fatigue",
+        show = settings.showFatigue,
+        ratio = storage.needs.fatigue,
+        color = needsConfig.hud.fatigueColor,
+        icon = needsConfig.hud.icons.fatigue
+      },
+      {
+        name = "bladder",
+        show = settings.showBladder,
+        ratio = storage.needs.bladder,
+        color = needsConfig.hud.bladderColor,
+        icon = needsConfig.hud.icons.bladder
+      },
+      {
+        name = "hygiene",
+        show = settings.showHygiene,
+        ratio = 100 - storage.needs.hygiene,
+        color = needsConfig.hud.hygieneColor,
+        icon = needsConfig.hud.icons.hygiene
+      }
+    }
+
+    local row = 0
+    for _, bar in ipairs(bars) do
+      if bar.show then
+        drawNeedBar(bar.name, firstY - step * row, bar.ratio, bar.color, bar.icon)
+        row = row + 1
+      end
+    end
+
+    if settings.tooltips then
+      local hovered = hoveredNeedName()
+      if hovered then
+        local hoverRect = hudBarRects[hovered]
+        drawNeedTooltip(hovered, sleeping, hoverRect[4])
+      end
+    end
   end
 
-  if needsConfig.hud.enabled and needsConfig.hud.tooltips.enabled then
-    local hovered = hoveredNeedName()
-    if hovered then
-      local hoverRect = hudBarRects[hovered]
-      drawNeedTooltip(hovered, sleeping, hoverRect[4])
-    end
+  if settingsOpen then
+    drawSettingsOverlay()
   end
 end
 
@@ -2468,13 +2750,11 @@ function init()
   _, damageInflictedHeartbeat = status.inflictedDamageSince()
   refreshWarningLevels(false)
 
-  if needsConfig.hud.enabled then
-    hudLayout = loadHudLayout()
-    if hudLayout then
-      hudCanvas = interface.bindCanvas(needsConfig.hud.canvasName)
-      if not hudCanvas then
-        sb.logWarn("[xneeds_v0] HUD disabled: xStarbound canvas could not be bound")
-      end
+  hudLayout = loadHudLayout()
+  if type(interface) == "table" and type(interface.bindCanvas) == "function" then
+    hudCanvas = interface.bindCanvas(needsConfig.hud.canvasName)
+    if not hudCanvas then
+      sb.logWarn("[xneeds_v0] HUD disabled: xStarbound canvas could not be bound")
     end
   end
 
@@ -2502,6 +2782,14 @@ function update(dt)
   end
 
   beverageFeedbackCooldown = math.max(0, beverageFeedbackCooldown - dt)
+
+  for needName, remaining in pairs(pulseTimers) do
+    pulseTimers[needName] = math.max(0, remaining - dt)
+  end
+
+  if settingsOpen then
+    handleSettingsClick()
+  end
 
   local sleeping = isSleeping()
   local needsDt = dt

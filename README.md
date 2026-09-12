@@ -4,7 +4,7 @@ Needs is an xStarbound survival-simulation mod that adds Thirst, Fatigue,
 Bladder, and Hygiene to the player without replacing the vanilla or Frackin'
 Universe HUD.
 
-Current version: **1.10.0**
+Current version: **1.11.0**
 
 ![Needs HUD preview](_previewimage.png)
 
@@ -44,6 +44,9 @@ supported.
   qualifying sleep grants a temporary Rested bonus.
 - Day/night Fatigue: staying awake at night adds Fatigue faster.
 - Environment-driven Thirst and Fatigue from hot, cold, toxic, and other biomes.
+- In-game settings overlay for user-configurable HUD options: meters on/off,
+  hover tooltips, compact bars, always-show values, threshold pulse, and
+  per-need bar visibility.
 - Local testing and beverage-diagnostic commands.
 
 ## Installation
@@ -93,6 +96,14 @@ active penalties for that need. Tooltips are hover-only, reuse the existing HUD
 styling, and add no permanent labels or separate panel. Set
 `hud.tooltips.enabled` to `false` to disable them while keeping the meters.
 
+### In-game settings
+
+Run `/xneeds options` to open a settings panel drawn over the HUD. It exposes
+HUD meters on/off, hover tooltips, compact bars, always-show values, threshold
+pulse, and per-need bar visibility. Choices are saved per character and applied
+immediately; use the Close button or `/xneeds options` again to close it. The
+config file supplies the defaults for a new character.
+
 ## Testing commands
 
 Commands are local to the current player and do not require disabling
@@ -120,6 +131,7 @@ xStarbound safe scripts.
 /xneeds foods all
 /xneeds foods details
 /xneeds foods <profile>
+/xneeds options
 /xneeds reset
 ```
 

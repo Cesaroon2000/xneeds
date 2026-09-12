@@ -3,6 +3,19 @@
 All notable changes to Needs are documented here. Versions follow Semantic
 Versioning while the mod remains in active development.
 
+## [1.11.0] - 2026-09-11
+
+### Added
+
+- In-game settings overlay opened with `/xneeds options`. It provides
+  user-configurable HUD options: meters on/off, hover tooltips, compact bars,
+  always-show values, threshold pulse, and per-need bar visibility.
+- HUD settings persist per character in the player script storage and apply
+  immediately. The config file supplies the defaults.
+- Compact bars use a shorter width and hide icons; always-show values print the
+  numeric value beside each bar; the threshold pulse briefly brightens a bar
+  when its need crosses into a higher tier.
+
 ## [1.10.0] - 2026-09-11
 
 ### Added
