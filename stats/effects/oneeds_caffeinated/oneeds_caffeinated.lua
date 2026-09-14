@@ -17,7 +17,7 @@ function update(dt)
 
   local ok, remaining = pcall(effect.duration)
   if ok and type(remaining) == "number" and remaining == remaining then
-    world.sendEntityMessage(entity.id(), "xneeds_v0.caffeine", remaining)
+    world.sendEntityMessage(entity.id(), "oneeds.caffeine", remaining)
   end
 end
 

@@ -1,0 +1,6 @@
+{
+  "name" : "oneeds_rested",
+  "effectConfig" : {},
+  "defaultDuration" : 300,
+  "scripts" : [ "oneeds_rested.lua" ]
+}

@@ -37,7 +37,7 @@ local function consumablePatch(effectName, effects)
   return operations
 end
 
-local needsConfig = assets.json("/xneeds_v0.config")
+local needsConfig = assets.json("/oneeds.config")
 local beverages = type(needsConfig.beverages) == "table" and needsConfig.beverages or {}
 local foods = type(needsConfig.foods) == "table" and needsConfig.foods or {}
 
@@ -91,15 +91,15 @@ for index, assetPath in ipairs(assets.byExtension("consumable")) do
 
   if itemName ~= "" and (isDrink or isFood) then
     local suffix = string.format("%s_%s", safeName(itemName), index)
-    local effectName = "xneedsdrink_" .. suffix
-    local generatedRoot = "/xneeds_v0/generated/consumables/" .. suffix
+    local effectName = "oneedsdrink_" .. suffix
+    local generatedRoot = "/oneeds/generated/consumables/" .. suffix
     local effectPath = generatedRoot .. ".statuseffect"
     local patchPath = generatedRoot .. ".patch"
 
     assets.add(effectPath, {
       name = effectName,
       defaultDuration = 0.1,
-      scripts = { "/scripts/xneeds_v0/drink_effect.lua" },
+      scripts = { "/scripts/oneeds/drink_effect.lua" },
       effectConfig = {
         itemName = itemName
       }

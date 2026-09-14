@@ -1,7 +1,7 @@
 [
   {
     "op" : "add",
-    "path" : "/genericScriptContexts/xneeds_v0",
-    "value" : "/scripts/xneeds_v0/player.lua"
+    "path" : "/genericScriptContexts/oneeds",
+    "value" : "/scripts/oneeds/player.lua"
   }
 ]

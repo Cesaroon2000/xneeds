@@ -1,5 +1,5 @@
 local storageVersion = 2
-local consequenceCategory = "xneeds_v1_penalties"
+local consequenceCategory = "oneeds_penalties"
 
 local needsConfig
 local updateAccumulator = 0
@@ -60,7 +60,7 @@ local localizedStrings
 
 local function strings()
   if localizedStrings == nil then
-    local ok, value = pcall(root.assetJson, "/xneeds_v0.strings")
+    local ok, value = pcall(root.assetJson, "/oneeds.strings")
     localizedStrings = ok and type(value) == "table" and value or {}
   end
   return localizedStrings
@@ -80,9 +80,23 @@ local function stringFor(path, default)
   return default
 end
 
+-- OpenStarbound exposes messages through interface.queueMessage; older
+-- xStarbound builds exposed player.queueStatusMessage. Prefer the former and
+-- fall back so the script stays safe if the client-side API is unavailable.
+local function queueStatusMessage(messageText)
+  if type(messageText) ~= "string" or messageText == "" then
+    return
+  end
+  if type(interface) == "table" and type(interface.queueMessage) == "function" then
+    interface.queueMessage(messageText)
+  elseif type(player) == "table" and type(player.queueStatusMessage) == "function" then
+    player.queueStatusMessage(messageText)
+  end
+end
+
 local function requireNumber(value, path)
   if not isFiniteNumber(value) then
-    error(string.format("[xneeds_v0] %s must be a finite number", path))
+    error(string.format("[oneeds] %s must be a finite number", path))
   end
   return value
 end
@@ -90,7 +104,7 @@ end
 local function requirePositiveNumber(value, path)
   value = requireNumber(value, path)
   if value <= 0 then
-    error(string.format("[xneeds_v0] %s must be greater than zero", path))
+    error(string.format("[oneeds] %s must be greater than zero", path))
   end
   return value
 end
@@ -98,7 +112,7 @@ end
 local function requireNonnegativeNumber(value, path)
   value = requireNumber(value, path)
   if value < 0 then
-    error(string.format("[xneeds_v0] %s must not be negative", path))
+    error(string.format("[oneeds] %s must not be negative", path))
   end
   return value
 end
@@ -106,29 +120,29 @@ end
 local function requireMultiplier(value, path)
   value = requirePositiveNumber(value, path)
   if value > 1 then
-    error(string.format("[xneeds_v0] %s must not exceed 1", path))
+    error(string.format("[oneeds] %s must not exceed 1", path))
   end
   return value
 end
 
 local function requireStringList(value, path)
   if type(value) ~= "table" then
-    error(string.format("[xneeds_v0] %s must be a list", path))
+    error(string.format("[oneeds] %s must be a list", path))
   end
   for index, entry in ipairs(value) do
     if type(entry) ~= "string" or entry == "" then
-      error(string.format("[xneeds_v0] %s[%s] must be a non-empty string", path, index))
+      error(string.format("[oneeds] %s[%s] must be a non-empty string", path, index))
     end
   end
 end
 
 local function requirePositiveNumberMap(value, path)
   if type(value) ~= "table" then
-    error(string.format("[xneeds_v0] %s must be an object", path))
+    error(string.format("[oneeds] %s must be an object", path))
   end
   for key, entry in pairs(value) do
     if type(key) ~= "string" or key == "" then
-      error(string.format("[xneeds_v0] %s keys must be non-empty strings", path))
+      error(string.format("[oneeds] %s keys must be non-empty strings", path))
     end
     requirePositiveNumber(entry, path .. "." .. key)
   end
@@ -136,12 +150,12 @@ end
 
 local function requireBiomePatternRules(value, path)
   if type(value) ~= "table" then
-    error(string.format("[xneeds_v0] %s must be a list", path))
+    error(string.format("[oneeds] %s must be a list", path))
   end
   for index, rule in ipairs(value) do
     local rulePath = string.format("%s[%s]", path, index)
     if type(rule) ~= "table" then
-      error(string.format("[xneeds_v0] %s must be an object", rulePath))
+      error(string.format("[oneeds] %s must be an object", rulePath))
     end
     requirePositiveNumber(rule.multiplier, rulePath .. ".multiplier")
     requireStringList(rule.patterns, rulePath .. ".patterns")
@@ -150,12 +164,12 @@ end
 
 local function requireColor(value, path)
   if type(value) ~= "table" or #value ~= 4 then
-    error(string.format("[xneeds_v0] %s must be an RGBA color", path))
+    error(string.format("[oneeds] %s must be an RGBA color", path))
   end
   for index, channel in ipairs(value) do
     requireNumber(channel, string.format("%s[%s]", path, index))
     if channel < 0 or channel > 255 then
-      error(string.format("[xneeds_v0] %s channels must be between 0 and 255", path))
+      error(string.format("[oneeds] %s channels must be between 0 and 255", path))
     end
   end
 end
@@ -166,14 +180,14 @@ local function requireConsumableProfiles(section, path)
       or type(section.profiles) ~= "table"
       or type(section.itemProfiles) ~= "table"
       or type(section.classificationRules) ~= "table" then
-    error(string.format("[xneeds_v0] %s configuration is invalid", path))
+    error(string.format("[oneeds] %s configuration is invalid", path))
   end
 
   for profileName, profile in pairs(section.profiles) do
     local profilePath = path .. ".profiles." .. tostring(profileName)
     if type(profileName) ~= "string" or profileName == ""
         or type(profile) ~= "table" then
-      error(string.format("[xneeds_v0] %s profile names and values must be valid", path))
+      error(string.format("[oneeds] %s profile names and values must be valid", path))
     end
     requireNumber(profile.thirstRecovery, profilePath .. ".thirstRecovery")
     requireNumber(profile.bladderGain, profilePath .. ".bladderGain")
@@ -181,14 +195,14 @@ local function requireConsumableProfiles(section, path)
     requireNonnegativeNumber(profile.caffeineDuration, profilePath .. ".caffeineDuration")
   end
   if type(section.profiles[section.defaultProfile]) ~= "table" then
-    error(string.format("[xneeds_v0] %s.defaultProfile does not name a profile", path))
+    error(string.format("[oneeds] %s.defaultProfile does not name a profile", path))
   end
 
   for itemName, profileName in pairs(section.itemProfiles) do
     if type(itemName) ~= "string" or itemName == ""
         or type(profileName) ~= "string"
         or type(section.profiles[profileName]) ~= "table" then
-      error(string.format("[xneeds_v0] %s.itemProfiles contains an invalid mapping", path))
+      error(string.format("[oneeds] %s.itemProfiles contains an invalid mapping", path))
     end
   end
   for index, rule in ipairs(section.classificationRules) do
@@ -196,7 +210,7 @@ local function requireConsumableProfiles(section, path)
     if type(rule) ~= "table"
         or type(rule.profile) ~= "string"
         or type(section.profiles[rule.profile]) ~= "table" then
-      error("[xneeds_v0] " .. rulePath .. " has an invalid profile")
+      error("[oneeds] " .. rulePath .. " has an invalid profile")
     end
     requireStringList(rule.patterns, rulePath .. ".patterns")
   end
@@ -209,20 +223,20 @@ local function requireConsumableFeedback(section, path)
       or type(feedback.profileMessages) ~= "table"
       or type(feedback.dehydratingMessage) ~= "string"
       or feedback.dehydratingMessage == "" then
-    error(string.format("[xneeds_v0] %s.feedback configuration is invalid", path))
+    error(string.format("[oneeds] %s.feedback configuration is invalid", path))
   end
   requireNonnegativeNumber(feedback.cooldownSeconds, path .. ".feedback.cooldownSeconds")
   for profileName, messageText in pairs(feedback.profileMessages) do
     if type(section.profiles[profileName]) ~= "table"
         or type(messageText) ~= "string"
         or messageText == "" then
-      error(string.format("[xneeds_v0] %s.feedback.profileMessages contains an invalid entry", path))
+      error(string.format("[oneeds] %s.feedback.profileMessages contains an invalid entry", path))
     end
   end
 end
 
 local function loadConfig()
-  local config = root.assetJson("/xneeds_v0.config")
+  local config = root.assetJson("/oneeds.config")
   local requiredSections = {
     "defaults",
     "thirst",
@@ -240,18 +254,18 @@ local function loadConfig()
   }
 
   if type(config) ~= "table" then
-    error("[xneeds_v0] xneeds_v0.config is invalid")
+    error("[oneeds] oneeds.config is invalid")
   end
   for _, section in ipairs(requiredSections) do
     if type(config[section]) ~= "table" then
-      error(string.format("[xneeds_v0] xneeds_v0.config is missing %s", section))
+      error(string.format("[oneeds] oneeds.config is missing %s", section))
     end
   end
 
   requireNumber(config.schemaVersion, "schemaVersion")
   if config.schemaVersion ~= storageVersion then
     error(string.format(
-      "[xneeds_v0] config schema %s does not match storage schema %s",
+      "[oneeds] config schema %s does not match storage schema %s",
       config.schemaVersion,
       storageVersion
     ))
@@ -260,7 +274,7 @@ local function loadConfig()
   requirePositiveNumber(config.updateInterval, "updateInterval")
   requirePositiveNumber(config.maxCatchupSeconds, "maxCatchupSeconds")
   if config.maxCatchupSeconds < config.updateInterval then
-    error("[xneeds_v0] maxCatchupSeconds must be at least updateInterval")
+    error("[oneeds] maxCatchupSeconds must be at least updateInterval")
   end
 
   for needName in pairs(needNames) do
@@ -275,7 +289,7 @@ local function loadConfig()
   for _, needName in ipairs({"thirst", "fatigue"}) do
     local needEnvironment = config[needName].environment
     if type(needEnvironment) ~= "table" then
-      error(string.format("[xneeds_v0] %s.environment configuration is missing", needName))
+      error(string.format("[oneeds] %s.environment configuration is missing", needName))
     end
     requirePositiveNumberMap(
       needEnvironment.biomeGainMultipliers,
@@ -293,12 +307,12 @@ local function loadConfig()
 
   local circadian = config.fatigue.circadian
   if type(circadian) ~= "table" or type(circadian.enabled) ~= "boolean" then
-    error("[xneeds_v0] fatigue.circadian configuration is invalid")
+    error("[oneeds] fatigue.circadian configuration is invalid")
   end
   for _, key in ipairs({"nightStart", "nightEnd"}) do
     requireNumber(circadian[key], "fatigue.circadian." .. key)
     if circadian[key] < 0 or circadian[key] > 1 then
-      error("[xneeds_v0] fatigue.circadian." .. key .. " must be between 0 and 1")
+      error("[oneeds] fatigue.circadian." .. key .. " must be between 0 and 1")
     end
   end
   requirePositiveNumber(circadian.nightGainMultiplier, "fatigue.circadian.nightGainMultiplier")
@@ -308,7 +322,7 @@ local function loadConfig()
   if type(rested) ~= "table" or type(rested.enabled) ~= "boolean"
       or type(rested.effect) ~= "string" or rested.effect == ""
       or type(rested.message) ~= "string" then
-    error("[xneeds_v0] fatigue.rested configuration is invalid")
+    error("[oneeds] fatigue.rested configuration is invalid")
   end
   requirePositiveNumber(rested.gainMultiplier, "fatigue.rested.gainMultiplier")
   requirePositiveNumber(rested.durationSeconds, "fatigue.rested.durationSeconds")
@@ -322,12 +336,12 @@ local function loadConfig()
   requireNumber(config.hygiene.minimumLiquidPercentage, "hygiene.minimumLiquidPercentage")
   if config.hygiene.minimumLiquidPercentage < 0
       or config.hygiene.minimumLiquidPercentage > 1 then
-    error("[xneeds_v0] hygiene.minimumLiquidPercentage must be between 0 and 1")
+    error("[oneeds] hygiene.minimumLiquidPercentage must be between 0 and 1")
   end
   requireNonnegativeNumber(config.hygiene.fixtureSearchRadius, "hygiene.fixtureSearchRadius")
   if type(config.hygiene.environment) ~= "table"
       or type(config.hygiene.combat) ~= "table" then
-    error("[xneeds_v0] hygiene environment or combat configuration is missing")
+    error("[oneeds] hygiene environment or combat configuration is missing")
   end
   requirePositiveNumberMap(
     config.hygiene.cleanLiquidRecoveryRates,
@@ -338,7 +352,7 @@ local function loadConfig()
   requireNumber(environment.minimumLiquidPercentage, "hygiene.environment.minimumLiquidPercentage")
   if environment.minimumLiquidPercentage < 0
       or environment.minimumLiquidPercentage > 1 then
-    error("[xneeds_v0] hygiene.environment.minimumLiquidPercentage must be between 0 and 1")
+    error("[oneeds] hygiene.environment.minimumLiquidPercentage must be between 0 and 1")
   end
   requireNonnegativeNumber(environment.dirtyLiquidRatePerSecond, "hygiene.environment.dirtyLiquidRatePerSecond")
   requireNonnegativeNumber(environment.rainRecoveryPerSecond, "hygiene.environment.rainRecoveryPerSecond")
@@ -380,13 +394,13 @@ local function loadConfig()
   }
   for _, setting in ipairs(stringSettings) do
     if type(setting[1]) ~= "string" or setting[1] == "" then
-      error(string.format("[xneeds_v0] %s must be a non-empty string", setting[2]))
+      error(string.format("[oneeds] %s must be a non-empty string", setting[2]))
     end
   end
 
   if type(config.thirst.itemOverrides) ~= "table"
       or type(config.bladder.itemOverrides) ~= "table" then
-    error("[xneeds_v0] itemOverrides settings must be objects")
+    error("[oneeds] itemOverrides settings must be objects")
   end
 
   local beverages = config.beverages
@@ -397,25 +411,25 @@ local function loadConfig()
   )
   if beverages.caffeineAwakeGainMultiplier < 0
       or beverages.caffeineAwakeGainMultiplier > 1 then
-    error("[xneeds_v0] beverages.caffeineAwakeGainMultiplier must be between 0 and 1")
+    error("[oneeds] beverages.caffeineAwakeGainMultiplier must be between 0 and 1")
   end
   requireConsumableFeedback(beverages, "beverages")
 
   local returnItems = beverages.returnItems
   if type(returnItems) ~= "table" or type(returnItems.enabled) ~= "boolean"
       or type(returnItems.items) ~= "table" then
-    error("[xneeds_v0] beverages.returnItems configuration is invalid")
+    error("[oneeds] beverages.returnItems configuration is invalid")
   end
   for consumedName, grantedName in pairs(returnItems.items) do
     if type(consumedName) ~= "string" or consumedName == ""
         or type(grantedName) ~= "string" or grantedName == "" then
-      error("[xneeds_v0] beverages.returnItems contains an invalid mapping")
+      error("[oneeds] beverages.returnItems contains an invalid mapping")
     end
   end
 
   local foods = config.foods
   if type(foods.enabled) ~= "boolean" then
-    error("[xneeds_v0] foods.enabled must be a boolean")
+    error("[oneeds] foods.enabled must be a boolean")
   end
   requireConsumableProfiles(foods, "foods")
   requireConsumableFeedback(foods, "foods")
@@ -428,11 +442,11 @@ local function loadConfig()
 
   if type(config.warnings.enabled) ~= "boolean"
       or type(config.warnings.messages) ~= "table" then
-    error("[xneeds_v0] warnings configuration is invalid")
+    error("[oneeds] warnings configuration is invalid")
   end
 
   if #config.thresholds == 0 then
-    error("[xneeds_v0] thresholds must contain at least one tier")
+    error("[oneeds] thresholds must contain at least one tier")
   end
 
   local previousThreshold = 0
@@ -442,16 +456,16 @@ local function loadConfig()
     if type(threshold) ~= "table"
         or type(threshold.key) ~= "string"
         or threshold.key == "" then
-      error(string.format("[xneeds_v0] %s must have a non-empty key", path))
+      error(string.format("[oneeds] %s must have a non-empty key", path))
     end
     if thresholdKeys[threshold.key] then
-      error(string.format("[xneeds_v0] duplicate threshold key: %s", threshold.key))
+      error(string.format("[oneeds] duplicate threshold key: %s", threshold.key))
     end
     thresholdKeys[threshold.key] = true
 
     requireNumber(threshold.value, path .. ".value")
     if threshold.value <= previousThreshold or threshold.value > 100 then
-      error("[xneeds_v0] thresholds must be strictly increasing within 0 through 100")
+      error("[oneeds] thresholds must be strictly increasing within 0 through 100")
     end
     previousThreshold = threshold.value
   end
@@ -459,7 +473,7 @@ local function loadConfig()
   if type(config.consequences.enabled) ~= "boolean"
       or type(config.consequences.minimumMultipliers) ~= "table"
       or type(config.consequences.profiles) ~= "table" then
-    error("[xneeds_v0] consequences configuration is invalid")
+    error("[oneeds] consequences configuration is invalid")
   end
 
   for _, dimension in ipairs(consequenceDimensions) do
@@ -473,14 +487,14 @@ local function loadConfig()
     local profiles = config.consequences.profiles[needName]
     local messages = config.warnings.messages[needName]
     if type(profiles) ~= "table" or type(messages) ~= "table" then
-      error(string.format("[xneeds_v0] consequence or warning profile missing for %s", needName))
+      error(string.format("[oneeds] consequence or warning profile missing for %s", needName))
     end
 
     for _, threshold in ipairs(config.thresholds) do
       local profile = profiles[threshold.key]
       if type(profile) ~= "table" then
         error(string.format(
-          "[xneeds_v0] consequences.profiles.%s.%s must be an object",
+          "[oneeds] consequences.profiles.%s.%s must be an object",
           needName,
           threshold.key
         ))
@@ -495,7 +509,7 @@ local function loadConfig()
       end
 
       if type(messages[threshold.key]) ~= "string" or messages[threshold.key] == "" then
-        error(string.format("[xneeds_v0] warning message missing for %s.%s", needName, threshold.key))
+        error(string.format("[oneeds] warning message missing for %s.%s", needName, threshold.key))
       end
     end
   end
@@ -503,7 +517,7 @@ local function loadConfig()
   if type(config.hud.enabled) ~= "boolean"
       or type(config.hud.canvasName) ~= "string"
       or config.hud.canvasName == "" then
-    error("[xneeds_v0] hud.enabled or hud.canvasName is invalid")
+    error("[oneeds] hud.enabled or hud.canvasName is invalid")
   end
   requirePositiveNumber(config.hud.barHeight, "hud.barHeight")
   requireNonnegativeNumber(config.hud.barGap, "hud.barGap")
@@ -513,12 +527,12 @@ local function loadConfig()
   requirePositiveNumber(config.hud.iconScale, "hud.iconScale")
   requirePositiveNumber(config.hud.iconSize, "hud.iconSize")
   if type(config.hud.icons) ~= "table" then
-    error("[xneeds_v0] hud.icons must be an object")
+    error("[oneeds] hud.icons must be an object")
   end
   for needName in pairs(needNames) do
     if type(config.hud.icons[needName]) ~= "string"
         or config.hud.icons[needName] == "" then
-      error("[xneeds_v0] hud.icons." .. needName .. " must be an image path")
+      error("[oneeds] hud.icons." .. needName .. " must be an image path")
     end
   end
   requireColor(config.hud.backgroundColor, "hud.backgroundColor")
@@ -536,7 +550,7 @@ local function loadConfig()
     config.hud.tooltips = tooltips
   end
   if type(tooltips) ~= "table" or type(tooltips.enabled) ~= "boolean" then
-    error("[xneeds_v0] hud.tooltips.enabled must be a boolean")
+    error("[oneeds] hud.tooltips.enabled must be a boolean")
   end
   if tooltips.enabled then
     requireNonnegativeNumber(tooltips.gap, "hud.tooltips.gap")
@@ -546,7 +560,7 @@ local function loadConfig()
     requirePositiveNumber(tooltips.fontSize, "hud.tooltips.fontSize")
     requireColor(tooltips.textColor, "hud.tooltips.textColor")
     if type(tooltips.tierColors) ~= "table" then
-      error("[xneeds_v0] hud.tooltips.tierColors must be an object")
+      error("[oneeds] hud.tooltips.tierColors must be an object")
     end
     requireColor(tooltips.tierColors.normal, "hud.tooltips.tierColors.normal")
     for _, threshold in ipairs(config.thresholds) do
@@ -558,7 +572,7 @@ local function loadConfig()
   end
 
   if type(config.debug.commandsEnabled) ~= "boolean" then
-    error("[xneeds_v0] debug.commandsEnabled must be a boolean")
+    error("[oneeds] debug.commandsEnabled must be a boolean")
   end
 
   config.bladder.drinkCategory = string.lower(config.bladder.drinkCategory)
@@ -663,8 +677,8 @@ local function normalizeSettings(settings)
 end
 
 local function settings()
-  storage.xneedsSettings = normalizeSettings(storage.xneedsSettings)
-  return storage.xneedsSettings
+  storage.oneedsSettings = normalizeSettings(storage.oneedsSettings)
+  return storage.oneedsSettings
 end
 
 local function hudSettings()
@@ -806,7 +820,7 @@ local function resolveHygieneLiquidIds()
     if ok and isFiniteNumber(liquidId) then
       cleanLiquidIds[liquidId] = true
     else
-      sb.logWarn("[xneeds_v0] unknown clean liquid name: %s", liquidName)
+      sb.logWarn("[oneeds] unknown clean liquid name: %s", liquidName)
     end
   end
 
@@ -815,7 +829,7 @@ local function resolveHygieneLiquidIds()
     if ok and isFiniteNumber(liquidId) then
       dirtyLiquidIds[liquidId] = true
     else
-      sb.logWarn("[xneeds_v0] unknown dirty liquid name: %s", liquidName)
+      sb.logWarn("[oneeds] unknown dirty liquid name: %s", liquidName)
     end
   end
 end
@@ -916,9 +930,17 @@ end
 local function currentBiome()
   local position = mcontroller.position()
   local tilePosition = {math.floor(position[1]), math.floor(position[2])}
-  local ok, biomeName = pcall(world.biomeAt, tilePosition, true)
-  if ok and type(biomeName) == "string" then
-    return string.lower(biomeName)
+  -- OpenStarbound returns the biome asset as a JSON object whose name is
+  -- `baseName`. Older engines returned the name string directly.
+  local ok, biome = pcall(world.biomeAt, tilePosition)
+  if not ok then
+    return nil
+  end
+  if type(biome) == "string" then
+    return string.lower(biome)
+  end
+  if type(biome) == "table" and type(biome.baseName) == "string" then
+    return string.lower(biome.baseName)
   end
 end
 
@@ -1113,7 +1135,7 @@ local function refreshWarningLevels(notify)
       local key = needsConfig.thresholds[newLevel].key
       local messageText = type(messages) == "table" and messages[key] or nil
       if type(messageText) == "string" and messageText ~= "" then
-        player.queueStatusMessage(messageText)
+        queueStatusMessage(messageText)
       end
       if hudSettings().pulse then
         pulseTimers[needName] = pulseDuration
@@ -1237,7 +1259,7 @@ local function caffeineRemaining()
 end
 
 local function onCaffeineUpdate(_, _, remaining)
-  -- The xneeds_caffeinated effect reports its own remaining duration here, so
+  -- The oneeds_caffeinated effect reports its own remaining duration here, so
   -- the readout follows the real status effect instead of a second countdown.
   if not isFiniteNumber(remaining) or remaining < 0 or remaining > 86400 then
     return
@@ -1332,7 +1354,7 @@ local function trackSleepRest(sleeping, dt)
         and sleepAccumulatedSeconds >= rested.minimumSleepSeconds then
       status.addEphemeralEffect(rested.effect, rested.durationSeconds, entity.id())
       if rested.message ~= "" then
-        player.queueStatusMessage(stringFor("messages.rested", rested.message))
+        queueStatusMessage(stringFor("messages.rested", rested.message))
       end
     end
     sleepAccumulatedSeconds = 0
@@ -1400,17 +1422,17 @@ local function advanceNeeds(elapsed)
 
   if needsConfig.debug.logRecoveryEvents then
     if reliefRate > 0 then
-      sb.logInfo("[xneeds_v0] bladder relief rate: %s", reliefRate)
+      sb.logInfo("[oneeds] bladder relief rate: %s", reliefRate)
     end
     if hygieneState.recoveryRate > 0 then
-      sb.logInfo("[xneeds_v0] hygiene recovery rate: %s", hygieneState.recoveryRate)
+      sb.logInfo("[oneeds] hygiene recovery rate: %s", hygieneState.recoveryRate)
     end
     local environmentalLoss = hygieneState.activityLoss
       + hygieneState.contaminationLoss
       + hygieneState.combatLoss
     if environmentalLoss > 0 then
       sb.logInfo(
-        "[xneeds_v0] environmental hygiene loss: %s (activity %s, liquid %s, combat %s)",
+        "[oneeds] environmental hygiene loss: %s (activity %s, liquid %s, combat %s)",
         environmentalLoss,
         hygieneState.activityLoss,
         hygieneState.contaminationLoss,
@@ -1585,7 +1607,7 @@ local function queueConsumableFeedback(feedback, profileName, thirstRecovery)
     messageText = feedback.dehydratingMessage
   end
   if messageText then
-    player.queueStatusMessage(messageText)
+    queueStatusMessage(messageText)
     beverageFeedbackCooldown = feedback.cooldownSeconds
   end
 end
@@ -1603,7 +1625,7 @@ local function grantConsumedReturn(itemName)
 
   player.giveItem({name = grantedName, count = 1})
   if needsConfig.debug.logDrinkEvents then
-    sb.logInfo("[xneeds_v0] returned %s for %s", grantedName, itemName)
+    sb.logInfo("[oneeds] returned %s for %s", grantedName, itemName)
   end
 end
 
@@ -1724,7 +1746,7 @@ local function onConsumedItem(_, isLocal, itemName)
 
   if needsConfig.debug.logDrinkEvents then
     sb.logInfo(
-      "[xneeds_v0] consume event: %s (%s) profile %s, bladder %+g, thirst recovery %+g, fatigue %+g, caffeine %gs",
+      "[oneeds] consume event: %s (%s) profile %s, bladder %+g, thirst recovery %+g, fatigue %+g, caffeine %gs",
       itemName,
       kind,
       profileName,
@@ -1740,7 +1762,7 @@ local function localOnly(isLocal)
   if not isLocal then
     return {
       ok = false,
-      error = "xneeds_v0 debug messages are local-only"
+      error = "oneeds debug messages are local-only"
     }
   end
 end
@@ -1907,18 +1929,18 @@ end
 local function commandHelp(errorText)
   local prefix = errorText and ("^red;" .. errorText .. "^reset;\n") or ""
   return prefix
-    .. "^#f3d36a;</xneeds>^reset; local testing commands\n"
-    .. "^cyan;/xneeds get^reset;\n"
-    .. "^cyan;/xneeds set <thirst|fatigue|bladder|hygiene|dirtiness|all> <0-100>^reset;\n"
-    .. "^cyan;/xneeds add <need> <amount>^reset;\n"
-    .. "^cyan;/xneeds beverage <itemName>^reset;\n"
-    .. "^cyan;/xneeds beverages [all|details|<profile>|<text>]^reset;\n"
-    .. "^cyan;/xneeds food <itemName>^reset;\n"
-    .. "^cyan;/xneeds foods [all|details|<profile>|<text>]^reset;\n"
-    .. "^cyan;/xneeds options^reset;\n"
-    .. "^cyan;/xneeds help [needs|tiers|drinks|foods|hygiene|sleep|settings|commands]^reset;\n"
-    .. "^cyan;/xneeds preset <normal|noticeable|serious|urgent|critical>^reset;\n"
-    .. "^cyan;/xneeds reset^reset;"
+    .. "^#f3d36a;</oneeds>^reset; local testing commands\n"
+    .. "^cyan;/oneeds get^reset;\n"
+    .. "^cyan;/oneeds set <thirst|fatigue|bladder|hygiene|dirtiness|all> <0-100>^reset;\n"
+    .. "^cyan;/oneeds add <need> <amount>^reset;\n"
+    .. "^cyan;/oneeds beverage <itemName>^reset;\n"
+    .. "^cyan;/oneeds beverages [all|details|<profile>|<text>]^reset;\n"
+    .. "^cyan;/oneeds food <itemName>^reset;\n"
+    .. "^cyan;/oneeds foods [all|details|<profile>|<text>]^reset;\n"
+    .. "^cyan;/oneeds options^reset;\n"
+    .. "^cyan;/oneeds help [needs|tiers|drinks|foods|hygiene|sleep|settings|commands]^reset;\n"
+    .. "^cyan;/oneeds preset <normal|noticeable|serious|urgent|critical>^reset;\n"
+    .. "^cyan;/oneeds reset^reset;"
 end
 
 local helpTopics = {
@@ -1936,7 +1958,7 @@ local function needsHelp(topic)
   if type(topic) ~= "string" or topic == "" then
     return stringFor(
       "help.overview",
-      "Type /xneeds help <topic>. Topics: "
+      "Type /oneeds help <topic>. Topics: "
         .. table.concat(helpTopics, ", ")
         .. "."
     )
@@ -2132,7 +2154,10 @@ local function consumableAudit(kind, arguments)
           source
         )
         if showDetails then
-          local sourceOk, sourcePath = pcall(root.assetSource, record.path)
+          -- OpenStarbound names this root.assetOrigin; fall back to the older
+          -- root.assetSource name if it is ever present.
+          local sourceLookup = root.assetOrigin or root.assetSource
+          local sourceOk, sourcePath = pcall(sourceLookup, record.path)
           entry = string.format(
             "%s\n    path: %s\n    mod: %s\n    text: %s",
             entry,
@@ -2266,7 +2291,7 @@ local function needsCommand(rawArguments)
     if settingsOpen then
       return stringFor(
         "messages.settingsOpened",
-        "Needs settings opened. Use the Close button or /xneeds options to close."
+        "Needs settings opened. Use the Close button or /oneeds options to close."
       )
     end
     return stringFor("messages.settingsClosed", "Needs settings closed.")
@@ -2584,7 +2609,7 @@ local function loadHudLayout()
       or not isFiniteNumber(foodBar.position[2])
       or not isFiniteNumber(foodBar.size[1])
       or foodBar.size[1] <= 0 then
-    sb.logWarn("[xneeds_v0] HUD disabled: unable to derive placement from teambar.config foodBar")
+    sb.logWarn("[oneeds] HUD disabled: unable to derive placement from teambar.config foodBar")
     return nil
   end
 
@@ -2835,7 +2860,7 @@ local function drawSettingsOverlay()
 
   local closeTop = bottom + padding + 16
   hudCanvas:drawText(
-    stringFor("settings.helpHint", "Type /xneeds help for details"),
+    stringFor("settings.helpHint", "Type /oneeds help for details"),
     {
       position = {left + width / 2, closeTop + 8},
       horizontalAnchor = "mid",
@@ -2979,13 +3004,15 @@ local function drawHud(sleeping)
   end
 end
 
-local function xStarboundAvailable()
-  return type(interface) == "table" and type(root.assetsByExtension) == "function"
+local function requiredApisAvailable()
+  return type(interface) == "table"
+    and type(root.assetsByExtension) == "function"
+    and type(interface.bindCanvas) == "function"
 end
 
 function init()
-  if not xStarboundAvailable() then
-    sb.logWarn("[xneeds_v0] xStarbound is required; Needs is disabled on this client.")
+  if not requiredApisAvailable() then
+    sb.logWarn("[oneeds] required OpenStarbound APIs are unavailable; oNeeds is disabled on this client.")
     return
   end
 
@@ -3000,25 +3027,25 @@ function init()
   if type(interface) == "table" and type(interface.bindCanvas) == "function" then
     hudCanvas = interface.bindCanvas(needsConfig.hud.canvasName)
     if not hudCanvas then
-      sb.logWarn("[xneeds_v0] HUD disabled: xStarbound canvas could not be bound")
+      sb.logWarn("[oneeds] HUD disabled: OpenStarbound canvas could not be bound")
     end
   end
 
-  message.setHandler("xneeds_v0.consume", onConsumedItem)
-  message.setHandler("xneeds_v0.caffeine", onCaffeineUpdate)
-  message.setHandler("xneeds_v0.get", debugGet)
-  message.setHandler("xneeds_v0.set", debugSet)
-  message.setHandler("xneeds_v0.reset", debugReset)
+  message.setHandler("oneeds.consume", onConsumedItem)
+  message.setHandler("oneeds.caffeine", onCaffeineUpdate)
+  message.setHandler("oneeds.get", debugGet)
+  message.setHandler("oneeds.set", debugSet)
+  message.setHandler("oneeds.reset", debugReset)
   if needsConfig.debug.commandsEnabled then
     message.setHandler({
-      name = "/xneeds",
+      name = "/oneeds",
       passName = false,
       localOnly = true
     }, needsCommand)
   end
 
   if needsConfig.debug.logInitialization then
-    sb.logInfo("[xneeds_v0] initialized storage schema %s", storage.needs.version)
+    sb.logInfo("[oneeds] initialized storage schema %s", storage.needs.version)
   end
 end
 

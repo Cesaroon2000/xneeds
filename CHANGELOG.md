@@ -1,25 +1,43 @@
 # Changelog
 
-All notable changes to Needs are documented here. Versions follow Semantic
+All notable changes to oNeeds are documented here. Versions follow Semantic
 Versioning while the mod remains in active development.
 
-## [Unreleased]
+## [1.14.0] - 2026-09-13
+
+OpenStarbound port.
 
 ### Added
 
 - Sleep recovery selector in the settings overlay (Slow 0.5x, Normal 1x, Fast
   2x) that scales how quickly sleeping restores Fatigue. It is saved per
-  character and reported by `/xneeds get`.
+  character and reported by `/oneeds get`.
+
+### Changed
+
+- Retargeted the mod from xStarbound to OpenStarbound. The mod no longer
+  requires the `xSBassets` dependency and loads on a stock OpenStarbound
+  install.
+- Status messages now use `interface.queueMessage`, OpenStarbound's client-side
+  message API, instead of the xStarbound-only `player.queueStatusMessage`.
+- Biome lookups now read the `baseName` field from OpenStarbound's
+  `world.biomeAt` result, which returns the biome asset rather than a name
+  string.
+- Renamed the mod identity and all namespaced assets from `xneeds_v0` to
+  `oneeds`: player script context, `oneeds.config`, `oneeds.strings`, generated
+  consumable effects, `oneeds_caffeinated` / `oneeds_rested`, the
+  `oneeds_penalties` modifier category, per-character settings storage, and the
+  `/oneeds` command.
 
 ## [1.13.0] - 2026-09-11
 
 ### Added
 
-- In-game help: `/xneeds help` lists topics and `/xneeds help <topic>` explains
+- In-game help: `/oneeds help` lists topics and `/oneeds help <topic>` explains
   needs, tiers, drinks, foods, hygiene, sleep, settings, and commands. The
   settings panel shows a help hint.
-- Localizable string table at `/xneeds_v0.strings` holding the help text and
-  system messages, loadable independently of `xneeds_v0.config` so translations
+- Localizable string table at `/oneeds.strings` holding the help text and
+  system messages, loadable independently of `oneeds.config` so translations
   can patch or replace it without touching gameplay tuning.
 
 ## [1.12.0] - 2026-09-11
@@ -32,13 +50,13 @@ Versioning while the mod remains in active development.
   1.5x) that scales passive Thirst/Fatigue/Bladder gain and Hygiene decay.
 - Settings storage is now structured (`hud` and `gameplay` tables) with
   automatic migration from the flat V1.11 shape.
-- `/xneeds get` reports the active difficulty and gameplay toggles.
+- `/oneeds get` reports the active difficulty and gameplay toggles.
 
 ## [1.11.0] - 2026-09-11
 
 ### Added
 
-- In-game settings overlay opened with `/xneeds options`. It provides
+- In-game settings overlay opened with `/oneeds options`. It provides
   user-configurable HUD options: meters on/off, hover tooltips, compact bars,
   always-show values, threshold pulse, and per-need bar visibility.
 - HUD settings persist per character in the player script storage and apply
@@ -72,7 +90,7 @@ Versioning while the mod remains in active development.
   override parameters and can grant caffeine like drinks.
 - `foods` configuration section with profiles, classification rules, exact
   `itemProfiles`, feedback messages, and an `enabled` toggle.
-- `/xneeds food <itemName>` diagnostic and `/xneeds foods` audit with the same
+- `/oneeds food <itemName>` diagnostic and `/oneeds foods` audit with the same
   `all`, `details`, profile, and name-fragment filters as the beverage audit.
 
 ### Changed
@@ -87,7 +105,7 @@ Versioning while the mod remains in active development.
 - Day/night Fatigue: awake Fatigue gain increases at night through
   `fatigue.circadian`, with configurable night and day multipliers.
 - Temporary Rested bonus: sleeping for at least the configured minimum applies
-  an invisible `xneeds_rested` effect that reduces awake Fatigue gain for its
+  an invisible `oneeds_rested` effect that reduces awake Fatigue gain for its
   duration.
 - Environment-driven Thirst and Fatigue: biome and environment-effect gain
   multipliers under `thirst.environment` and `fatigue.environment`, matching the
@@ -95,7 +113,7 @@ Versioning while the mod remains in active development.
 - Ordered biome pattern fallback for Thirst, Fatigue, and Hygiene, so modded
   biome variants inherit a base multiplier (`aliendesert` matches `desert`).
   Exact keys take precedence and unmatched biomes stay neutral at 1.0.
-- `/xneeds get` now reports night/day, Rested state, and the current thirst and
+- `/oneeds get` now reports night/day, Rested state, and the current thirst and
   fatigue environment multipliers. The Fatigue and Thirst hover tooltips show
   the active circadian/rested/environment state.
 
@@ -128,9 +146,9 @@ Versioning while the mod remains in active development.
   active penalties for that need.
 - `hud.tooltips` configuration for enabling the tooltips, sizing, and tier
   colors. Disabled tooltips leave the existing meters unchanged.
-- Remaining caffeine time is reported by `/xneeds get` and shown in the Fatigue
+- Remaining caffeine time is reported by `/oneeds get` and shown in the Fatigue
   hover tooltip.
-- `/xneeds beverages` audit lists every detected drink with its resolved profile
+- `/oneeds beverages` audit lists every detected drink with its resolved profile
   and source, defaulting to the items that fall back to `standard`. Accepts
   `all`, `details`, a profile name, or a name fragment. `details` also reports
   the asset path, source mod, and the text the classifier sees.
@@ -164,7 +182,7 @@ Versioning while the mod remains in active development.
 
 - Cooldown-controlled contextual feedback for caffeine, alcohol, salty, toxic,
   and dehydrating drinks.
-- Detailed `/xneeds beverage <itemName>` profile and override diagnostics.
+- Detailed `/oneeds beverage <itemName>` profile and override diagnostics.
 - Explicit opt-in support for modded consumables outside the normal `drink`
   category.
 
@@ -231,7 +249,7 @@ Versioning while the mod remains in active development.
 - Four configurable severity thresholds and crossing warnings.
 - Need-specific movement, jump, power, energy-regeneration, and protection
   consequences with safety floors.
-- Local `/xneeds` testing commands.
+- Local `/oneeds` testing commands.
 
 ## [1.0.0] - 2026-09-11
 

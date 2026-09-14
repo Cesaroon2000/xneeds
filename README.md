@@ -1,22 +1,23 @@
-# Needs
+# oNeeds
 
-Needs is an xStarbound survival-simulation mod that adds Thirst, Fatigue,
+oNeeds is an OpenStarbound survival-simulation mod that adds Thirst, Fatigue,
 Bladder, and Hygiene to the player without replacing the vanilla or Frackin'
-Universe HUD.
+Universe HUD. It is a port of xNeeds to OpenStarbound.
 
-Current version: **1.13.0**
+Current version: **1.14.0**
 
-![Needs HUD preview](_previewimage.png)
+![oNeeds HUD preview](_previewimage.png)
 
 ## Requirements
 
-- Starbound running through xStarbound.
-- The bundled `xSBassets` dependency.
+- Starbound running through OpenStarbound.
+- No additional asset packs or dependencies; oNeeds is self-contained.
 
-This mod uses xStarbound-specific player contexts, full-window canvases,
-post-load asset processing, and slash-command handlers. Stock Starbound and
-OpenStarbound are not supported. On a client without xStarbound the player
-script logs a single warning and disables itself instead of running.
+oNeeds uses OpenStarbound's generic player-script contexts, full-window
+canvases, post-load asset processing, and slash-command handlers. Stock
+Starbound and xStarbound are not supported. On a client without the required
+OpenStarbound APIs the player script logs a single warning and disables itself
+instead of running.
 
 ## Features
 
@@ -45,14 +46,14 @@ script logs a single warning and disables itself instead of running.
   qualifying sleep grants a temporary Rested bonus.
 - Day/night Fatigue: staying awake at night adds Fatigue faster.
 - Environment-driven Thirst and Fatigue from hot, cold, toxic, and other biomes.
-- In-game settings overlay (`/xneeds options`) for user-configurable options:
+- In-game settings overlay (`/oneeds options`) for user-configurable options:
   HUD meters, hover tooltips, compact bars, always-show values, threshold pulse,
   per-need bar visibility, gameplay toggles (warnings, consequences, feedback,
   day/night fatigue, rested bonus, environment effects), and a difficulty
   selector (Casual, Realistic, Hardcore).
-- In-game help via `/xneeds help [topic]` covering needs, tiers, drinks, foods,
+- In-game help via `/oneeds help [topic]` covering needs, tiers, drinks, foods,
   hygiene, sleep, settings, and commands.
-- A localizable string table (`xneeds_v0.strings`) for help and system messages.
+- A localizable string table (`oneeds.strings`) for help and system messages.
 - Local testing and beverage-diagnostic commands.
 
 ## Installation
@@ -62,19 +63,19 @@ Place this directory directly in the Starbound `mods` directory:
 ```text
 Starbound/
   mods/
-    xneeds_v0/
+    oneeds/
       _metadata
-      xneeds_v0.config
+      oneeds.config
       ...
 ```
 
-Restart xStarbound after installing or updating the mod. Existing characters
-initialize missing Needs data automatically.
+Restart OpenStarbound after installing or updating the mod. Existing characters
+initialize missing oNeeds data automatically.
 
 ## Configuration
 
 All gameplay and presentation tuning is centralized in
-[`xneeds_v0.config`](xneeds_v0.config).
+[`oneeds.config`](oneeds.config).
 
 Important sections include:
 
@@ -94,7 +95,7 @@ Important sections include:
   hover tooltips.
 - `debug`: local testing controls and logging.
 
-Help and system messages are kept in `xneeds_v0.strings` (JSON), which can be
+Help and system messages are kept in `oneeds.strings` (JSON), which can be
 patched or replaced for translation independently of the gameplay config.
 
 ### HUD hover details
@@ -107,47 +108,47 @@ styling, and add no permanent labels or separate panel. Set
 
 ### In-game settings
 
-Run `/xneeds options` to open a settings panel drawn over the HUD. It exposes
+Run `/oneeds options` to open a settings panel drawn over the HUD. It exposes
 HUD options (meters on/off, hover tooltips, compact bars, always-show values,
 threshold pulse, per-need bar visibility) and gameplay options (warnings,
 consequences, feedback, day/night fatigue, rested bonus, environment effects),
 plus difficulty and sleep recovery selectors. Difficulty scales passive gains
 and decay (Casual, Realistic, Hardcore); sleep recovery controls how fast
 sleeping restores Fatigue (Slow 0.5x, Normal 1x, Fast 2x). Choices are saved per
-character and applied immediately; use the Close button or `/xneeds options`
+character and applied immediately; use the Close button or `/oneeds options`
 again to close it. The config file supplies the defaults for a new character.
 
 ## Testing commands
 
-Commands are local to the current player and do not require disabling
-xStarbound safe scripts.
+Commands are local to the current player and do not require disabling safe
+scripts.
 
 ```text
-/xneeds
-/xneeds get
-/xneeds set fatigue 70
-/xneeds set thirst 90
-/xneeds set bladder 85
-/xneeds set hygiene 25
-/xneeds set dirtiness 75
-/xneeds set all 85
-/xneeds add bladder -20
-/xneeds preset critical
-/xneeds beverage coffee
-/xneeds beverage <itemName>
-/xneeds beverages
-/xneeds beverages all
-/xneeds beverages details
-/xneeds beverages <profile>
-/xneeds food <itemName>
-/xneeds foods
-/xneeds foods all
-/xneeds foods details
-/xneeds foods <profile>
-/xneeds options
-/xneeds help
-/xneeds help <topic>
-/xneeds reset
+/oneeds
+/oneeds get
+/oneeds set fatigue 70
+/oneeds set thirst 90
+/oneeds set bladder 85
+/oneeds set hygiene 25
+/oneeds set dirtiness 75
+/oneeds set all 85
+/oneeds add bladder -20
+/oneeds preset critical
+/oneeds beverage coffee
+/oneeds beverage <itemName>
+/oneeds beverages
+/oneeds beverages all
+/oneeds beverages details
+/oneeds beverages <profile>
+/oneeds food <itemName>
+/oneeds foods
+/oneeds foods all
+/oneeds foods details
+/oneeds foods <profile>
+/oneeds options
+/oneeds help
+/oneeds help <topic>
+/oneeds reset
 ```
 
 The beverage and food commands report the selected profile, classification
@@ -167,7 +168,7 @@ asset sources.
 
 Sleeping in a recognized bed accelerates Fatigue recovery so a full recharge
 takes about three minutes at the Normal setting. The Sleep recovery option in
-`/xneeds options` scales that rate (Slow 0.5x, Normal 1x, Fast 2x). The mod never
+`/oneeds options` scales that rate (Slow 0.5x, Normal 1x, Fast 2x). The mod never
 changes the application time scale or sends chat commands, avoiding the
 interaction and save-and-quit problems that game-clock acceleration caused.
 Leaving the bed stops the recovery.
@@ -192,13 +193,14 @@ Leaving the bed stops the recovery.
 
 Host requirements:
 
-- **xStarbound + Frackin' Universe, or xStarbound alone:** fully supported.
+- **OpenStarbound + Frackin' Universe, or OpenStarbound alone:** fully
+  supported.
 - **Stock Starbound (with or without FU):** unsupported. The post-load script
   never runs, so drinks and foods are not registered, and the player script
-  detects the missing xStarbound APIs and disables itself with one log warning
-  instead of erroring.
-- **OpenStarbound / StarExtensions:** partially compatible at best, because the
-  post-load asset preprocessor is xStarbound-only.
+  detects the missing OpenStarbound APIs and disables itself with one log
+  warning instead of erroring.
+- **xStarbound / StarExtensions:** unsupported, as this port targets
+  OpenStarbound's asset and scripting APIs.
 
 ## Safe removal
 
@@ -218,7 +220,7 @@ replace vanilla resources.
 Implementation details, extension parameters, and compatibility boundaries are
 documented in [`docs/V1_DEVELOPMENT.md`](docs/V1_DEVELOPMENT.md).
 
-Pack the directory itself with xStarbound's `asset_packer`; generated `.pak`
+Pack the directory itself with OpenStarbound's `asset_packer`; generated `.pak`
 files are intentionally ignored by Git.
 
 ## License

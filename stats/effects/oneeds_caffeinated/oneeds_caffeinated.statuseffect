@@ -1,0 +1,6 @@
+{
+  "name" : "oneeds_caffeinated",
+  "effectConfig" : {},
+  "defaultDuration" : 300,
+  "scripts" : [ "oneeds_caffeinated.lua" ]
+}
