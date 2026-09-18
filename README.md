@@ -4,7 +4,7 @@ Needs is an xStarbound survival-simulation mod that adds Thirst, Fatigue,
 Bladder, and Hygiene to the player without replacing the vanilla or Frackin'
 Universe HUD.
 
-Current version: **1.13.0**
+Current version: **1.14.0**
 
 ![Needs HUD preview](_previewimage.png)
 

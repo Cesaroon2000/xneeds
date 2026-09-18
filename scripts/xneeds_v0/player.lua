@@ -24,6 +24,10 @@ local hudBarRects = {}
 local pulseTimers = {}
 local pulseDuration = 1.2
 local settingsOpen = false
+local hudDragging = false
+local hudDragMouseStart = {0, 0}
+local hudDragOffsetStart = {0, 0}
+local hudDragHandleRect
 
 local needNames = {
   thirst = true,
@@ -617,7 +621,9 @@ local function newHudSettings()
     showThirst = true,
     showFatigue = true,
     showBladder = true,
-    showHygiene = true
+    showHygiene = true,
+    hudOffsetX = 0,
+    hudOffsetY = 0
   }
 end
 
@@ -630,7 +636,11 @@ local function newGameplaySettings()
     rested = needsConfig.fatigue.rested.enabled ~= false,
     environment = true,
     rateScale = 1.0,
-    sleepSpeed = 1.0
+    sleepSpeed = 1.0,
+    thirstEnabled = true,
+    fatigueEnabled = true,
+    bladderEnabled = true,
+    hygieneEnabled = true
   }
 end
 
@@ -689,6 +699,10 @@ local function sleepRecoveryScale()
     return 1
   end
   return scale
+end
+
+local function needEnabled(needName)
+  return gameplaySettings()[needName .. "Enabled"] ~= false
 end
 
 local function safeCurrentEmoteIsSleep()
@@ -1105,29 +1119,35 @@ end
 
 local function refreshWarningLevels(notify)
   for needName in pairs(needNames) do
-    local newLevel = needLevel(problemValue(needName))
-    local previousLevel = warningLevels[needName] or 0
+    if not needEnabled(needName) then
+      warningLevels[needName] = 0
+    else
+      local newLevel = needLevel(problemValue(needName))
+      local previousLevel = warningLevels[needName] or 0
 
-    if notify and gameplaySettings().warnings and newLevel > previousLevel then
-      local messages = needsConfig.warnings.messages[needName]
-      local key = needsConfig.thresholds[newLevel].key
-      local messageText = type(messages) == "table" and messages[key] or nil
-      if type(messageText) == "string" and messageText ~= "" then
-        player.queueStatusMessage(messageText)
+      if notify and gameplaySettings().warnings and newLevel > previousLevel then
+        local messages = needsConfig.warnings.messages[needName]
+        local key = needsConfig.thresholds[newLevel].key
+        local messageText = type(messages) == "table" and messages[key] or nil
+        if type(messageText) == "string" and messageText ~= "" then
+          player.queueStatusMessage(messageText)
+        end
+        if hudSettings().pulse then
+          pulseTimers[needName] = pulseDuration
+        end
       end
-      if hudSettings().pulse then
-        pulseTimers[needName] = pulseDuration
-      end
+
+      warningLevels[needName] = newLevel
     end
-
-    warningLevels[needName] = newLevel
   end
 end
 
 local function highestConsequenceLevel()
   local level = 0
   for needName in pairs(needNames) do
-    level = math.max(level, needLevel(problemValue(needName)))
+    if needEnabled(needName) then
+      level = math.max(level, needLevel(problemValue(needName)))
+    end
   end
   return level
 end
@@ -1145,7 +1165,10 @@ local function currentConsequences()
   local consequencesEnabled = gameplaySettings().consequences
 
   for needName in pairs(needNames) do
-    local level = needLevel(problemValue(needName))
+    local level = 0
+    if needEnabled(needName) then
+      level = needLevel(problemValue(needName))
+    end
     result.levels[needName] = level
 
     if consequencesEnabled and level > 0 then
@@ -1344,53 +1367,65 @@ local function advanceNeeds(elapsed)
 
   local biomeName = currentBiome() or "none"
   local scale = rateScale()
+  local reliefRate = 0
+  local hygieneState
 
-  if isSleeping() then
-    storage.needs.fatigue = storage.needs.fatigue
-      - needsConfig.fatigue.sleepRecoveryPerSecond * sleepRecoveryScale() * elapsed
-  else
-    local fatigueGainMultiplier = 1
-    if caffeineActive() then
+  if needEnabled("fatigue") then
+    if isSleeping() then
+      storage.needs.fatigue = storage.needs.fatigue
+        - needsConfig.fatigue.sleepRecoveryPerSecond * sleepRecoveryScale() * elapsed
+    else
+      local fatigueGainMultiplier = 1
+      if caffeineActive() then
+        fatigueGainMultiplier = fatigueGainMultiplier
+          * needsConfig.beverages.caffeineAwakeGainMultiplier
+      end
       fatigueGainMultiplier = fatigueGainMultiplier
-        * needsConfig.beverages.caffeineAwakeGainMultiplier
+        * circadianGainMultiplier()
+        * restedGainMultiplier()
+        * needEnvironmentMultiplier("fatigue", biomeName)
+      storage.needs.fatigue = storage.needs.fatigue
+        + needsConfig.fatigue.awakeGainPerSecond
+        * fatigueGainMultiplier * scale * elapsed
     end
-    fatigueGainMultiplier = fatigueGainMultiplier
-      * circadianGainMultiplier()
-      * restedGainMultiplier()
-      * needEnvironmentMultiplier("fatigue", biomeName)
-    storage.needs.fatigue = storage.needs.fatigue
-      + needsConfig.fatigue.awakeGainPerSecond
-      * fatigueGainMultiplier * scale * elapsed
   end
 
-  storage.needs.thirst = storage.needs.thirst
-    + needsConfig.thirst.passiveGainPerSecond
-    * needEnvironmentMultiplier("thirst", biomeName)
-    * scale * elapsed
-
-  local reliefRate = bladderReliefRate()
-  if reliefRate > 0 then
-    storage.needs.bladder = storage.needs.bladder - reliefRate * elapsed
-  else
-    storage.needs.bladder = storage.needs.bladder
-      + needsConfig.bladder.passiveGainPerSecond * scale * elapsed
+  if needEnabled("thirst") then
+    storage.needs.thirst = storage.needs.thirst
+      + needsConfig.thirst.passiveGainPerSecond
+      * needEnvironmentMultiplier("thirst", biomeName)
+      * scale * elapsed
   end
 
-  local hygieneState = hygieneEnvironment(elapsed)
-  if hygieneState.recoveryRate > 0 then
+  if needEnabled("bladder") then
+    reliefRate = bladderReliefRate()
+    if reliefRate > 0 then
+      storage.needs.bladder = storage.needs.bladder - reliefRate * elapsed
+    else
+      storage.needs.bladder = storage.needs.bladder
+        + needsConfig.bladder.passiveGainPerSecond * scale * elapsed
+    end
+  end
+
+  if needEnabled("hygiene") then
+    hygieneState = hygieneEnvironment(elapsed)
+    if hygieneState.recoveryRate > 0 then
+      storage.needs.hygiene = storage.needs.hygiene
+        + hygieneState.recoveryRate * elapsed
+    else
+      storage.needs.hygiene = storage.needs.hygiene
+        - hygieneState.passiveLoss
+    end
     storage.needs.hygiene = storage.needs.hygiene
-      + hygieneState.recoveryRate * elapsed
-  else
-    storage.needs.hygiene = storage.needs.hygiene
-      - hygieneState.passiveLoss
-  end
-  storage.needs.hygiene = storage.needs.hygiene
-    - hygieneState.activityLoss
-    - hygieneState.contaminationLoss
-    - hygieneState.combatLoss
+      - hygieneState.activityLoss
+      - hygieneState.contaminationLoss
+      - hygieneState.combatLoss
 
-  lastHygieneEnvironment = hygieneState
-  pendingCombatDirtiness = math.max(0, pendingCombatDirtiness - hygieneState.combatLoss)
+    lastHygieneEnvironment = hygieneState
+    pendingCombatDirtiness = math.max(0, pendingCombatDirtiness - hygieneState.combatLoss)
+  else
+    pendingCombatDirtiness = 0
+  end
   pendingRunningSeconds = 0
   pendingJumpingSeconds = 0
 
@@ -1402,20 +1437,22 @@ local function advanceNeeds(elapsed)
     if reliefRate > 0 then
       sb.logInfo("[xneeds_v0] bladder relief rate: %s", reliefRate)
     end
-    if hygieneState.recoveryRate > 0 then
+    if hygieneState and hygieneState.recoveryRate > 0 then
       sb.logInfo("[xneeds_v0] hygiene recovery rate: %s", hygieneState.recoveryRate)
     end
-    local environmentalLoss = hygieneState.activityLoss
-      + hygieneState.contaminationLoss
-      + hygieneState.combatLoss
-    if environmentalLoss > 0 then
-      sb.logInfo(
-        "[xneeds_v0] environmental hygiene loss: %s (activity %s, liquid %s, combat %s)",
-        environmentalLoss,
-        hygieneState.activityLoss,
-        hygieneState.contaminationLoss,
-        hygieneState.combatLoss
-      )
+    if hygieneState then
+      local environmentalLoss = hygieneState.activityLoss
+        + hygieneState.contaminationLoss
+        + hygieneState.combatLoss
+      if environmentalLoss > 0 then
+        sb.logInfo(
+          "[xneeds_v0] environmental hygiene loss: %s (activity %s, liquid %s, combat %s)",
+          environmentalLoss,
+          hygieneState.activityLoss,
+          hygieneState.contaminationLoss,
+          hygieneState.combatLoss
+        )
+      end
     end
   end
 
@@ -1702,16 +1739,16 @@ local function onConsumedItem(_, isLocal, itemName)
   end
 
   normalizeStorage()
-  if isFiniteNumber(bladderGain) then
+  if isFiniteNumber(bladderGain) and needEnabled("bladder") then
     storage.needs.bladder = clampNeed(storage.needs.bladder + bladderGain)
   end
-  if isFiniteNumber(thirstRecovery) then
+  if isFiniteNumber(thirstRecovery) and needEnabled("thirst") then
     storage.needs.thirst = clampNeed(storage.needs.thirst - thirstRecovery)
   end
-  if isFiniteNumber(fatigueChange) then
+  if isFiniteNumber(fatigueChange) and needEnabled("fatigue") then
     storage.needs.fatigue = clampNeed(storage.needs.fatigue + fatigueChange)
   end
-  if isFiniteNumber(caffeineDuration) and caffeineDuration > 0 then
+  if isFiniteNumber(caffeineDuration) and caffeineDuration > 0 and needEnabled("fatigue") then
     status.addEphemeralEffect(
       needsConfig.beverages.caffeineEffect,
       caffeineDuration,
@@ -1780,7 +1817,11 @@ local function debugGet(_, isLocal)
     rested = gameplay.rested,
     environment = gameplay.environment,
     rateScale = gameplay.rateScale,
-    sleepSpeed = gameplay.sleepSpeed
+    sleepSpeed = gameplay.sleepSpeed,
+    thirstEnabled = gameplay.thirstEnabled,
+    fatigueEnabled = gameplay.fatigueEnabled,
+    bladderEnabled = gameplay.bladderEnabled,
+    hygieneEnabled = gameplay.hygieneEnabled
   }
   local consequences = currentConsequences()
   result.penaltyLevel = highestConsequenceLevel()
@@ -1851,7 +1892,7 @@ local function commandStatus()
   local consequences = currentConsequences()
   local hygieneState = hygieneEnvironment(needsConfig.updateInterval)
   return string.format(
-    "^#f3d36a;<Needs V1.13>^reset;\n"
+    "^#f3d36a;<Needs V1.14>^reset;\n"
       .. "Thirst: ^cyan;%.1f^reset; [%s]\n"
       .. "Fatigue: ^cyan;%.1f^reset; [%s]\n"
       .. "Bladder: ^cyan;%.1f^reset; [%s]\n"
@@ -2430,9 +2471,22 @@ local function appendNeedConsequenceLines(lines, needName, textColor)
 end
 
 local function needTooltipLines(needName, sleeping)
+  local textColor = needsConfig.hud.tooltips.textColor
+  if not needEnabled(needName) then
+    return {
+      {
+        text = needDisplayName(needName),
+        color = needHudColor(needName)
+      },
+      {
+        text = "Disabled",
+        color = textColor
+      }
+    }
+  end
+
   local problem = problemValue(needName)
   local level = needLevel(problem)
-  local textColor = needsConfig.hud.tooltips.textColor
   local lines = {
     {
       text = needDisplayName(needName),
@@ -2473,6 +2527,30 @@ local function hudIconSize()
     return 0
   end
   return needsConfig.hud.iconSize
+end
+
+local function hudOffsetX()
+  local value = hudSettings().hudOffsetX
+  if not isFiniteNumber(value) then
+    return 0
+  end
+  return value
+end
+
+local function hudOffsetY()
+  local value = hudSettings().hudOffsetY
+  if not isFiniteNumber(value) then
+    return 0
+  end
+  return value
+end
+
+local function hudAnchorX()
+  return hudLayout.x + hudOffsetX()
+end
+
+local function hudTopOffset()
+  return hudLayout.topOffset + hudOffsetY()
 end
 
 local function hudTextColor()
@@ -2526,13 +2604,13 @@ local function drawNeedTooltip(needName, sleeping, topY)
   local height = tooltips.padding * 2 + #lines * tooltips.lineHeight
 
   local canvasSize = hudCanvas:size()
-  local anchorX = hudLayout.x
+  local anchorX = hudAnchorX()
     + hudBarWidth()
     + needsConfig.hud.iconGap
     + hudIconSize()
     + tooltips.gap
   if anchorX + width > canvasSize[1] - 2 then
-    anchorX = math.max(2, hudLayout.x - tooltips.gap - width)
+    anchorX = math.max(2, hudAnchorX() - tooltips.gap - width)
   end
 
   local anchorY = topY
@@ -2600,7 +2678,7 @@ local function loadHudLayout()
 end
 
 local function drawNeedBar(needName, y, ratio, color, iconPath)
-  local x = hudLayout.x
+  local x = hudAnchorX()
   local width = hudBarWidth()
   local height = needsConfig.hud.barHeight
   local settings = hudSettings()
@@ -2668,6 +2746,152 @@ local function drawNeedBar(needName, y, ratio, color, iconPath)
   }
 end
 
+local dragHandleSize = 12
+
+local function hudVisibleRowCount(settings)
+  local rows = 0
+  for _, key in ipairs({"showThirst", "showFatigue", "showBladder", "showHygiene"}) do
+    if settings[key] then
+      rows = rows + 1
+    end
+  end
+  return rows
+end
+
+local function drawHudDragHandle()
+  local rect = hudDragHandleRect
+  if not rect then
+    return
+  end
+
+  local hovered = hudDragging or pointInsideRect(hudCanvas:mousePosition(), rect)
+  hudCanvas:drawRect(rect, needsConfig.hud.borderColor)
+  hudCanvas:drawRect(
+    {rect[1] + 1, rect[2] + 1, rect[3] - 1, rect[4] - 1},
+    hovered and hudAccentColor() or needsConfig.hud.backgroundColor
+  )
+
+  local color = hovered and {255, 255, 255, 255} or hudTextColor()
+  local cx = (rect[1] + rect[3]) / 2
+  local cy = (rect[2] + rect[4]) / 2
+  local arm = 3
+  hudCanvas:drawRect({cx - arm, cy - 1, cx + arm, cy + 1}, color)
+  hudCanvas:drawRect({cx - 1, cy - arm, cx + 1, cy + arm}, color)
+
+  local head = 2
+  for index = 0, head - 1 do
+    local half = head - index
+    hudCanvas:drawRect({cx - half, cy + arm + index, cx + half, cy + arm + index + 1}, color)
+    hudCanvas:drawRect({cx - half, cy - arm - index - 1, cx + half, cy - arm - index}, color)
+    hudCanvas:drawRect({cx + arm + index, cy - half, cx + arm + index + 1, cy + half}, color)
+    hudCanvas:drawRect({cx - arm - index - 1, cy - half, cx - arm - index, cy + half}, color)
+  end
+end
+
+local function clampNumber(value, minimum, maximum)
+  if value < minimum then
+    return minimum
+  end
+  if value > maximum then
+    return maximum
+  end
+  return value
+end
+
+local function clampHudOffset(offsetX, offsetY)
+  if not hudLayout or not hudCanvas then
+    return offsetX, offsetY
+  end
+
+  local canvasSize = hudCanvas:size()
+  local settings = hudSettings()
+  local rows = math.max(1, hudVisibleRowCount(settings))
+  local height = needsConfig.hud.barHeight
+  local step = height + needsConfig.hud.barGap
+  local iconSize = hudIconSize()
+  local trailing = iconSize > 0 and (needsConfig.hud.iconGap + iconSize) or 0
+  local totalWidth = hudBarWidth() + trailing + 3 + dragHandleSize
+
+  local minOffsetX = 2 - hudLayout.x
+  local maxOffsetX = (canvasSize[1] - 2) - (hudLayout.x + totalWidth)
+  if maxOffsetX < minOffsetX then
+    maxOffsetX = minOffsetX
+  end
+  offsetX = clampNumber(offsetX, minOffsetX, maxOffsetX)
+
+  local minOffsetY = 2 - canvasSize[2] - hudLayout.topOffset + height + dragHandleSize + 2
+  local maxOffsetY = -2 - hudLayout.topOffset - step * (rows - 1)
+  if maxOffsetY < minOffsetY then
+    maxOffsetY = minOffsetY
+  end
+  offsetY = clampNumber(offsetY, minOffsetY, maxOffsetY)
+
+  return offsetX, offsetY
+end
+
+local function handleHudDrag()
+  if not hudCanvas or not hudLayout or type(input) ~= "table" then
+    return
+  end
+
+  local settings = hudSettings()
+  if not settings.enabled then
+    hudDragging = false
+    return
+  end
+
+  local positionOk, mouse = pcall(function()
+    return hudCanvas:mousePosition()
+  end)
+  if not positionOk then
+    return
+  end
+
+  if hudDragging then
+    local offsetX, offsetY = clampHudOffset(
+      hudDragOffsetStart[1] + (mouse[1] - hudDragMouseStart[1]),
+      hudDragOffsetStart[2] + (mouse[2] - hudDragMouseStart[2])
+    )
+    settings.hudOffsetX = offsetX
+    settings.hudOffsetY = offsetY
+
+    local released = false
+    if type(input.mouseUp) == "function" then
+      local upOk, releases = pcall(input.mouseUp, "MouseLeft")
+      if upOk and type(releases) == "table" and #releases > 0 then
+        released = true
+      end
+    end
+    if not released and type(input.mouseHeld) == "function" then
+      local heldOk, held = pcall(input.mouseHeld, "MouseLeft")
+      if not heldOk or held ~= true then
+        released = true
+      end
+    end
+    if released then
+      hudDragging = false
+    end
+    return
+  end
+
+  if settingsOpen or not hudDragHandleRect then
+    return
+  end
+  if type(input.mouseDown) ~= "function" then
+    return
+  end
+
+  local downOk, clicks = pcall(input.mouseDown, "MouseLeft")
+  if not downOk or type(clicks) ~= "table" or #clicks == 0 then
+    return
+  end
+  if pointInsideRect(mouse, hudDragHandleRect) then
+    hudDragging = true
+    hudDragMouseStart = {mouse[1], mouse[2]}
+    hudDragOffsetStart = {settings.hudOffsetX, settings.hudOffsetY}
+  end
+end
+
 local difficultyOptions = {
   { label = "Casual", value = 0.75 },
   { label = "Realistic", value = 1.0 },
@@ -2699,6 +2923,12 @@ local function buildSettingsRows()
     { kind = "toggle", label = "Fatigue bar", table = "hud", key = "showFatigue" },
     { kind = "toggle", label = "Bladder bar", table = "hud", key = "showBladder" },
     { kind = "toggle", label = "Hygiene bar", table = "hud", key = "showHygiene" },
+    { kind = "button", label = "Reset HUD position", action = "resetHudPosition" },
+    { kind = "header", label = "Needs" },
+    { kind = "toggle", label = "Thirst", table = "gameplay", key = "thirstEnabled" },
+    { kind = "toggle", label = "Fatigue", table = "gameplay", key = "fatigueEnabled" },
+    { kind = "toggle", label = "Bladder", table = "gameplay", key = "bladderEnabled" },
+    { kind = "toggle", label = "Hygiene", table = "gameplay", key = "hygieneEnabled" },
     { kind = "header", label = "Gameplay" },
     { kind = "toggle", label = "Warnings", table = "gameplay", key = "warnings" },
     { kind = "toggle", label = "Consequences", table = "gameplay", key = "consequences" },
@@ -2793,6 +3023,24 @@ local function drawSettingsOverlay()
         },
         8,
         hudAccentColor()
+      )
+    elseif row.kind == "button" then
+      local buttonRect = {rowRect[1], rowRect[2] + 1, rowRect[3], rowRect[4] - 1}
+      local hovered = pointInsideRect(mouse, buttonRect)
+      hudCanvas:drawRect(buttonRect, needsConfig.hud.borderColor)
+      hudCanvas:drawRect(
+        {buttonRect[1] + 1, buttonRect[2] + 1, buttonRect[3] - 1, buttonRect[4] - 1},
+        hovered and hudAccentColor() or needsConfig.hud.backgroundColor
+      )
+      hudCanvas:drawText(
+        row.label,
+        {
+          position = {(buttonRect[1] + buttonRect[3]) / 2, buttonRect[2] + rowHeight / 2},
+          horizontalAnchor = "mid",
+          verticalAnchor = "mid"
+        },
+        8,
+        textColor
       )
     else
       if pointInsideRect(mouse, rowRect) then
@@ -2897,12 +3145,17 @@ local function handleSettingsClick()
   for index, rowRect in ipairs(settingsRowRects) do
     if pointInsideRect(mouse, rowRect) then
       local row = rows[index]
-      if row and row.kind ~= "header" then
-        local target = settingsTable(row.table)
+      if row then
         if row.kind == "toggle" then
+          local target = settingsTable(row.table)
           target[row.key] = not target[row.key]
-        else
+        elseif row.kind == "cycle" then
+          local target = settingsTable(row.table)
           target[row.key] = advanceCycle(row.options, target[row.key])
+        elseif row.kind == "button" and row.action == "resetHudPosition" then
+          local hud = hudSettings()
+          hud.hudOffsetX = 0
+          hud.hudOffsetY = 0
         end
       end
       return
@@ -2917,6 +3170,7 @@ local function drawHud(sleeping)
 
   hudCanvas:clear()
   hudBarRects = {}
+  hudDragHandleRect = nil
 
   local settings = hudSettings()
 
@@ -2924,7 +3178,7 @@ local function drawHud(sleeping)
     local canvasSize = hudCanvas:size()
     local height = needsConfig.hud.barHeight
     local step = height + needsConfig.hud.barGap
-    local firstY = canvasSize[2] + hudLayout.topOffset - height
+    local firstY = canvasSize[2] + hudTopOffset() - height
 
     local bars = {
       {
@@ -2963,6 +3217,15 @@ local function drawHud(sleeping)
         drawNeedBar(bar.name, firstY - step * row, bar.ratio, bar.color, bar.icon)
         row = row + 1
       end
+    end
+
+    if row > 0 then
+      local iconSize = hudIconSize()
+      local trailing = iconSize > 0 and (needsConfig.hud.iconGap + iconSize) or 0
+      local left = hudAnchorX() + hudBarWidth() + trailing + 3
+      local bottom = firstY - dragHandleSize - 2
+      hudDragHandleRect = {left, bottom, left + dragHandleSize, bottom + dragHandleSize}
+      drawHudDragHandle()
     end
 
     if settings.tooltips then
@@ -3040,13 +3303,23 @@ function update(dt)
     handleSettingsClick()
   end
 
+  handleHudDrag()
+
   local sleeping = isSleeping()
   local needsDt = dt
 
-  trackSleepRest(sleeping, dt)
+  if needEnabled("fatigue") then
+    trackSleepRest(sleeping, dt)
+  end
 
-  pollCombatDirtiness()
-  trackHygieneActivity(needsDt)
+  if needEnabled("hygiene") then
+    pollCombatDirtiness()
+    trackHygieneActivity(needsDt)
+  else
+    pendingCombatDirtiness = 0
+    pendingRunningSeconds = 0
+    pendingJumpingSeconds = 0
+  end
 
   updateAccumulator = math.min(
     updateAccumulator + needsDt,

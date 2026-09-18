@@ -3,10 +3,18 @@
 All notable changes to Needs are documented here. Versions follow Semantic
 Versioning while the mod remains in active development.
 
-## [Unreleased]
+## [1.14.0] - 2026-09-18
 
 ### Added
 
+- Draggable HUD: a small four-way arrow beneath the meters lets you drag the
+  whole needs display anywhere on screen. The position is clamped to stay
+  visible, saved per character, and can be reset from the settings overlay.
+- Per-need enable toggles in the settings overlay (Thirst, Fatigue, Bladder,
+  Hygiene). Disabled needs stop changing, no longer warn or penalize the
+  player, and ignore drinks, food, sleep, and environmental effects. Bars can
+  still be shown or hidden independently.
+- "Reset HUD position" button in the settings overlay.
 - Sleep recovery selector in the settings overlay (Slow 0.5x, Normal 1x, Fast
   2x) that scales how quickly sleeping restores Fatigue. It is saved per
   character and reported by `/xneeds get`.
