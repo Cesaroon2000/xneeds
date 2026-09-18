@@ -2968,28 +2968,214 @@ end
 local settingsRowRects = {}
 local settingsCloseRect
 
-local function settingsLayout(rowCount)
-  local canvasSize = hudCanvas:size()
-  local width = 224
-  local rowHeight = 15
-  local padding = 12
-  local titleHeight = 22
-  local closeArea = 42
-  local height = titleHeight + rowCount * rowHeight + closeArea + padding
-  local left = math.floor((canvasSize[1] - width) / 2)
-  local bottom = math.floor((canvasSize[2] - height) / 2)
-  return {left, bottom, left + width, bottom + height}, width, rowHeight, padding, titleHeight
+local settingsRowHeight = 15
+local settingsPadding = 12
+local settingsTitleHeight = 22
+local settingsCloseArea = 42
+local settingsColumnWidth = 224
+local settingsMinColumnWidth = 150
+local settingsColumnGap = 16
+local settingsMargin = 6
+
+local function settingsSectionGroups(rows, columnCount)
+  local sections = {}
+  for index, row in ipairs(rows) do
+    if row.kind == "header" or #sections == 0 then
+      table.insert(sections, {})
+    end
+    table.insert(sections[#sections], index)
+  end
+
+  local sectionCount = #sections
+  if columnCount > sectionCount then
+    columnCount = sectionCount
+  end
+  if columnCount <= 1 then
+    local group = {}
+    for index = 1, #rows do
+      table.insert(group, index)
+    end
+    return {group}
+  end
+
+  local bestMax
+  local bestSpread
+  local bestGroups
+
+  local function evaluate(groups)
+    local maxCount = 0
+    local minCount = math.huge
+    for _, group in ipairs(groups) do
+      local count = 0
+      for _, sectionIndex in ipairs(group) do
+        count = count + #sections[sectionIndex]
+      end
+      if count > maxCount then
+        maxCount = count
+      end
+      if count < minCount then
+        minCount = count
+      end
+    end
+    local spread = maxCount - minCount
+    if bestMax == nil or maxCount < bestMax
+        or (maxCount == bestMax and spread < bestSpread) then
+      bestMax = maxCount
+      bestSpread = spread
+      bestGroups = {}
+      for groupIndex, group in ipairs(groups) do
+        local saved = {}
+        for _, sectionIndex in ipairs(group) do
+          table.insert(saved, sectionIndex)
+        end
+        bestGroups[groupIndex] = saved
+      end
+    end
+  end
+
+  local function recurse(startSection, remaining, groups)
+    if remaining <= 1 then
+      local group = {}
+      for sectionIndex = startSection, sectionCount do
+        table.insert(group, sectionIndex)
+      end
+      table.insert(groups, group)
+      evaluate(groups)
+      table.remove(groups)
+      return
+    end
+    local lastStart = sectionCount - remaining + 1
+    for endSection = startSection, lastStart do
+      local group = {}
+      for sectionIndex = startSection, endSection do
+        table.insert(group, sectionIndex)
+      end
+      table.insert(groups, group)
+      recurse(endSection + 1, remaining - 1, groups)
+      table.remove(groups)
+    end
+  end
+
+  recurse(1, columnCount, {})
+
+  local result = {}
+  for groupIndex, group in ipairs(bestGroups) do
+    local rowGroup = {}
+    for _, sectionIndex in ipairs(group) do
+      for _, rowIndex in ipairs(sections[sectionIndex]) do
+        table.insert(rowGroup, rowIndex)
+      end
+    end
+    result[groupIndex] = rowGroup
+  end
+  return result
+end
+
+local function computeSettingsLayout(rows, canvasSize)
+  local availableHeight = canvasSize[2] - 2 * settingsMargin
+  local maxColumnsByWidth = math.floor(
+    (canvasSize[1] - 2 * settingsMargin + settingsColumnGap)
+      / (settingsMinColumnWidth + settingsColumnGap)
+  )
+  if maxColumnsByWidth < 1 then
+    maxColumnsByWidth = 1
+  end
+  local maxColumns = math.min(maxColumnsByWidth, #rows)
+  if maxColumns < 1 then
+    maxColumns = 1
+  end
+
+  local chosenGroups
+  local chosenHeight
+  for columnCount = 1, maxColumns do
+    local groups = settingsSectionGroups(rows, columnCount)
+    local maxRows = 0
+    for _, group in ipairs(groups) do
+      if #group > maxRows then
+        maxRows = #group
+      end
+    end
+    chosenGroups = groups
+    chosenHeight = settingsTitleHeight + maxRows * settingsRowHeight
+      + settingsCloseArea + settingsPadding
+    if chosenHeight <= availableHeight then
+      break
+    end
+  end
+
+  local columnCount = #chosenGroups
+  local columnWidth = math.min(
+    settingsColumnWidth,
+    math.floor(
+      (canvasSize[1] - 2 * settingsMargin - (columnCount - 1) * settingsColumnGap)
+        / columnCount
+    )
+  )
+  if columnWidth < 120 then
+    columnWidth = 120
+  end
+  local panelWidth = columnCount * columnWidth
+    + (columnCount - 1) * settingsColumnGap
+  local panelLeft = math.floor((canvasSize[1] - panelWidth) / 2)
+  if panelLeft < settingsMargin then
+    panelLeft = settingsMargin
+  end
+  local panelBottom = math.floor((canvasSize[2] - chosenHeight) / 2)
+  local maxBottom = canvasSize[2] - chosenHeight - settingsMargin
+  if maxBottom < settingsMargin then
+    maxBottom = settingsMargin
+  end
+  if panelBottom > maxBottom then
+    panelBottom = maxBottom
+  end
+  if panelBottom < settingsMargin then
+    panelBottom = settingsMargin
+  end
+  local panelTop = panelBottom + chosenHeight
+
+  local firstRowTop = panelTop - settingsTitleHeight - 4
+  local rowRects = {}
+  for columnIndex, group in ipairs(chosenGroups) do
+    local contentLeft = panelLeft + settingsPadding
+      + (columnIndex - 1) * (columnWidth + settingsColumnGap)
+    local contentRight = contentLeft + columnWidth - 2 * settingsPadding
+    for localIndex, rowIndex in ipairs(group) do
+      local rowTop = firstRowTop - (localIndex - 1) * settingsRowHeight
+      rowRects[rowIndex] = {
+        contentLeft,
+        rowTop - settingsRowHeight,
+        contentRight,
+        rowTop
+      }
+    end
+  end
+
+  local closeTop = panelBottom + settingsPadding + 16
+  return {
+    panel = {panelLeft, panelBottom, panelLeft + panelWidth, panelTop},
+    centerX = panelLeft + panelWidth / 2,
+    titleY = panelTop - settingsTitleHeight / 2 - 2,
+    hintY = closeTop + 8,
+    rowRects = rowRects,
+    closeRect = {
+      panelLeft + panelWidth / 2 - 30,
+      closeTop - 16,
+      panelLeft + panelWidth / 2 + 30,
+      closeTop
+    }
+  }
 end
 
 local function drawSettingsOverlay()
   local rows = buildSettingsRows()
-  local rect, width, rowHeight, padding, titleHeight = settingsLayout(#rows)
-  local left, bottom, right, top = rect[1], rect[2], rect[3], rect[4]
   local canvasSize = hudCanvas:size()
+  local layout = computeSettingsLayout(rows, canvasSize)
+  local panel = layout.panel
+  local left, bottom, right, top = panel[1], panel[2], panel[3], panel[4]
   local textColor = hudTextColor()
 
   hudCanvas:drawRect({0, 0, canvasSize[1], canvasSize[2]}, {0, 0, 0, 150})
-  hudCanvas:drawRect(rect, needsConfig.hud.borderColor)
+  hudCanvas:drawRect(panel, needsConfig.hud.borderColor)
   hudCanvas:drawRect(
     {left + 1, bottom + 1, right - 1, top - 1},
     needsConfig.hud.backgroundColor
@@ -2997,7 +3183,7 @@ local function drawSettingsOverlay()
   hudCanvas:drawText(
     "Needs Settings",
     {
-      position = {left + width / 2, top - titleHeight / 2 - 2},
+      position = {layout.centerX, layout.titleY},
       horizontalAnchor = "mid",
       verticalAnchor = "mid"
     },
@@ -3006,18 +3192,15 @@ local function drawSettingsOverlay()
   )
 
   local mouse = hudCanvas:mousePosition()
-  local firstRowTop = top - titleHeight - 4
-  settingsRowRects = {}
+  settingsRowRects = layout.rowRects
   for index, row in ipairs(rows) do
-    local rowTop = firstRowTop - (index - 1) * rowHeight
-    local rowRect = {left + padding, rowTop - rowHeight, right - padding, rowTop}
-    settingsRowRects[index] = rowRect
+    local rowRect = layout.rowRects[index]
 
     if row.kind == "header" then
       hudCanvas:drawText(
         row.label,
         {
-          position = {rowRect[1] + 2, rowRect[2] + rowHeight / 2},
+          position = {rowRect[1] + 2, rowRect[2] + settingsRowHeight / 2},
           horizontalAnchor = "left",
           verticalAnchor = "mid"
         },
@@ -3035,7 +3218,7 @@ local function drawSettingsOverlay()
       hudCanvas:drawText(
         row.label,
         {
-          position = {(buttonRect[1] + buttonRect[3]) / 2, buttonRect[2] + rowHeight / 2},
+          position = {(buttonRect[1] + buttonRect[3]) / 2, buttonRect[2] + settingsRowHeight / 2},
           horizontalAnchor = "mid",
           verticalAnchor = "mid"
         },
@@ -3050,7 +3233,7 @@ local function drawSettingsOverlay()
       local target = settingsTable(row.table)
       local boxSize = 9
       local boxLeft = rowRect[1] + 2
-      local boxBottom = rowRect[2] + (rowHeight - boxSize) / 2
+      local boxBottom = rowRect[2] + (settingsRowHeight - boxSize) / 2
       hudCanvas:drawRect(
         {boxLeft, boxBottom, boxLeft + boxSize, boxBottom + boxSize},
         needsConfig.hud.borderColor
@@ -3071,7 +3254,7 @@ local function drawSettingsOverlay()
       hudCanvas:drawText(
         label,
         {
-          position = {boxLeft + boxSize + 6, rowRect[2] + rowHeight / 2},
+          position = {boxLeft + boxSize + 6, rowRect[2] + settingsRowHeight / 2},
           horizontalAnchor = "left",
           verticalAnchor = "mid"
         },
@@ -3081,23 +3264,17 @@ local function drawSettingsOverlay()
     end
   end
 
-  local closeTop = bottom + padding + 16
   hudCanvas:drawText(
     stringFor("settings.helpHint", "Type /xneeds help for details"),
     {
-      position = {left + width / 2, closeTop + 8},
+      position = {layout.centerX, layout.hintY},
       horizontalAnchor = "mid",
       verticalAnchor = "mid"
     },
     7,
     needsConfig.hud.borderColor
   )
-  settingsCloseRect = {
-    left + width / 2 - 30,
-    closeTop - 16,
-    left + width / 2 + 30,
-    closeTop
-  }
+  settingsCloseRect = layout.closeRect
   local closeHovered = pointInsideRect(mouse, settingsCloseRect)
   hudCanvas:drawRect(settingsCloseRect, needsConfig.hud.borderColor)
   hudCanvas:drawRect(
@@ -3112,7 +3289,7 @@ local function drawSettingsOverlay()
   hudCanvas:drawText(
     "Close",
     {
-      position = {left + width / 2, settingsCloseRect[2] + 8},
+      position = {layout.centerX, settingsCloseRect[2] + 8},
       horizontalAnchor = "mid",
       verticalAnchor = "mid"
     },

@@ -19,6 +19,12 @@ Versioning while the mod remains in active development.
   2x) that scales how quickly sleeping restores Fatigue. It is saved per
   character and reported by `/xneeds get`.
 
+### Changed
+
+- The settings overlay now uses a responsive multi-column layout, so it stays
+  on screen at low resolutions or large interface scales instead of running off
+  the top and bottom.
+
 ## [1.13.0] - 2026-09-11
 
 ### Added
